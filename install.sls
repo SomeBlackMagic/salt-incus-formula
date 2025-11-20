@@ -5,18 +5,19 @@
 -#}
 {% from tpldir ~ "/map.jinja" import incus with context %}
 
-{% set os_family = grains.get("os_family") %}
-{% set codename = grains.get("oscodename", "bookworm") %}
-{% set incus_version = incus.get("version", None) %}
-{% set pkg_name = incus.pkg.get("name", "incus") %}
-
 {% if incus.enable %}
+  
+  {% set os_family = grains.get("os_family") %}
+  {% set codename = grains.get("oscodename", "bookworm") %}
+  {% set incus_version = incus.get("version", None) %}
+  {% set pkg_name = incus.pkg.get("name", "incus") %}
+  {% set db_file = '/var/lib/incus/database/global/db.bin' %}
 
-{#- Debian/Ubuntu repository setup -#}
-{% if incus.repo.enable and os_family == "Debian" %}
-{% set arch = incus.repo.debian.get("architecture", "amd64") %}
-{% set repo_channel = incus.repo.get("channel", "stable") %}
-{% set key_url = incus.repo.debian.get("key_url", "https://pkgs.zabbly.com/key.asc") %}
+  {#- Debian/Ubuntu repository setup -#}
+  {% if incus.repo.enable and os_family == "Debian" %}
+    {% set arch = incus.repo.debian.get("architecture", "amd64") %}
+    {% set repo_channel = incus.repo.get("channel", "stable") %}
+    {% set key_url = incus.repo.debian.get("key_url", "https://pkgs.zabbly.com/key.asc") %}
 
 incus-keyring-directory:
   file.directory:
@@ -53,15 +54,15 @@ incus-repo-list:
         Signed-By: /etc/apt/keyrings/zabbly.asc
     - require:
       - file: incus-repo-key
-{% endif %}
+  {% endif %}
 
-{#- RedHat/CentOS/Fedora repository setup -#}
-{% if incus.repo.enable and os_family == "RedHat" %}
-{% set repo_name = incus.repo.redhat.get("name", "incus-stable") %}
-{% set baseurl = incus.repo.redhat.get("baseurl", "https://pkgs.zabbly.com/incus/stable/rpm/$releasever/$basearch") %}
-{% set gpgkey = incus.repo.redhat.get("gpgkey", "https://pkgs.zabbly.com/key.asc") %}
-{% set repo_enabled = incus.repo.redhat.get("enabled", 1) %}
-{% set gpgcheck = incus.repo.redhat.get("gpgcheck", 1) %}
+  {#- RedHat/CentOS/Fedora repository setup -#}
+  {% if incus.repo.enable and os_family == "RedHat" %}
+  {% set repo_name = incus.repo.redhat.get("name", "incus-stable") %}
+  {% set baseurl = incus.repo.redhat.get("baseurl", "https://pkgs.zabbly.com/incus/stable/rpm/$releasever/$basearch") %}
+  {% set gpgkey = incus.repo.redhat.get("gpgkey", "https://pkgs.zabbly.com/key.asc") %}
+  {% set repo_enabled = incus.repo.redhat.get("enabled", 1) %}
+  {% set gpgcheck = incus.repo.redhat.get("gpgcheck", 1) %}
 
 incus-repo:
   pkgrepo.managed:
@@ -71,33 +72,45 @@ incus-repo:
     - gpgkey: {{ gpgkey }}
     - enabled: {{ repo_enabled }}
     - gpgcheck: {{ gpgcheck }}
-{% endif %}
+  {% endif %}
 
 {#- Install main Incus package -#}
 incus-package:
   pkg.installed:
     - name: {{ pkg_name }}
-{% if incus_version %}
+    {% if incus_version %}
     - version: {{ incus_version }}
-{% endif %}
-{% if incus.repo.enable %}
+    {% endif %}
+    {% if incus.repo.enable %}
     - refresh: True
-  {% if os_family == "Debian" %}
+    {% if os_family == "Debian" %}
     - require:
       - file: incus-repo-list
-  {% elif os_family == "RedHat" %}
+    {% elif os_family == "RedHat" %}
     - require:
       - pkgrepo: incus-repo
+    {% endif %}
   {% endif %}
-{% endif %}
 
-{#- Install dependencies -#}
-{% if incus.pkg.deps %}
+
+incus-database-present:
+  file.exists:
+    - name: {{ db_file }}
+
+incus-init:
+  cmd.run:
+    - name: incus admin init --minimal
+    - unless: test -f {{ db_file }}
+    - require:
+      - file: incus-database-present
+
+  {#- Install dependencies -#}
+  {% if incus.pkg.deps %}
 incus-deps:
   pkg.installed:
     - pkgs: {{ incus.pkg.deps | tojson }}
     - require:
       - pkg: incus-package
-{% endif %}
+  {% endif %}
 
 {% endif %}

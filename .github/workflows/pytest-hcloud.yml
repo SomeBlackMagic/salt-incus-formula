@@ -1,0 +1,95 @@
+name: pytest on Hetzner Cloud
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+
+
+jobs:
+  create-runner:
+    name: Create Hetzner Cloud runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.create-hcloud-runner.outputs.label }}
+      server_id: ${{ steps.create-hcloud-runner.outputs.server_id }}
+    steps:
+      - name: Create runner
+        id: create-hcloud-runner
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HETZNER_API_TOKEN }}
+          server_type: cx33
+          location: nbg1  # Nuremberg, Germany
+          image: ubuntu-24.04
+  build:
+    name: Do the job on the runner
+    needs:
+      - create-runner
+    runs-on: ${{ needs.create-runner.outputs.label }} # run the job on the newly created runner
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # , musl
+        libc: [glibc]
+        tool: [curl, strace]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install incus via apt
+        id: meta_ver
+        run: |
+          mkdir -p /etc/apt/keyrings/
+          curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+          
+          echo "Enabled: yes" | sudo tee /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Types: deb" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "URIs: https://pkgs.zabbly.com/incus/lts-6.0" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Suites: $(. /etc/os-release && echo "${VERSION_CODENAME}")" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Components: main" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Architectures: $(dpkg --print-architecture)" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Signed-By: /etc/apt/keyrings/zabbly.asc" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          
+          apt update
+          apt install -y incus incus-client python3.10-venv jq
+          incus admin init --auto --network-address=[::] --network-port=8443
+          incus admin waitready
+
+      - name: Run tests
+        id: meta_ver
+        run: |
+            set -exuo pipefail
+
+            python3.10 -m venv .venv
+            source .venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install -r requirements-test.txt
+            pytest || true
+
+
+
+  delete-runner:
+    name: Delete Hetzner Cloud runner
+    needs:
+      - create-runner # required to get output from the create-runner job
+      - build # required to wait when the main job is done
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Delete runner
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: delete
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HETZNER_API_TOKEN }}
+          name: ${{ needs.create-runner.outputs.label }}
+          server_id: ${{ needs.create-runner.outputs.server_id }}

@@ -1,10 +1,8 @@
 <picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/incus-logo.png" width="350" alt="Incus SaltStack Logo">
-  <img src="docs/incus-logo-black.png" width="350" alt="Incus SaltStack Logo">
+  <source media="(prefers-color-scheme: light)" srcset="https://cdn.jsdelivr.net/gh/SomeBlackMagic/salt-incus-formula@master/docs/incus-logo.png" width="350" alt="Incus Salt Logo">
+  <img src="https://cdn.jsdelivr.net/gh/SomeBlackMagic/salt-incus-formula@master/docs/incus-logo-black.png" width="350" alt="Incus Salt Logo">
 </picture>
 
-
-<img src="" alt="Incus Logo" width="300">
 
 Full-featured Salt formula for managing Incus infrastructure via REST API.
 

@@ -28,6 +28,8 @@ jobs:
           location: nbg1  # Nuremberg, Germany
           image: ubuntu-22.04
   build:
+    env:
+      INSTALL_EXTS: false
     name: Do the job on the runner
     needs:
       - create-runner
@@ -56,6 +58,7 @@ jobs:
           incus admin waitready
 
       - name: Setup env for testing
+        if: vars.INSTALL_EXTS == 'true'
         run: |
           apt update
           apt install -y ca-certificates curl
@@ -81,7 +84,7 @@ jobs:
           chmod +x /usr/local/bin/cephadm
           
           cephadm bootstrap \
-            --mon-ip "$(hostname -I | awk '{print $1}')" \
+            --mon-ip "$(curl -s http://checkip.amazonaws.com)" \
             --single-host-defaults \
             --skip-monitoring-stack \
             --skip-ssh
@@ -92,16 +95,17 @@ jobs:
           
           cephadm shell -- ceph osd pool create incus 32
 
+
       - name: Run tests
         run: |
-            set -euo pipefail
-
-            python3.10 -m venv .venv
-            source .venv/bin/activate
-            pip install --upgrade pip
-            pip install -r requirements.txt
-            pip install -r requirements-test.txt
-            pytest || true
+          set -euo pipefail
+          
+          python3.10 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+          pytest || true
 
 
 

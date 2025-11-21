@@ -31,7 +31,7 @@ cases:
             - "CONTAINER"
     cleanup:
       - incus delete test-cont-1 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 2: instance_002 - VM debian ephemeral with autostart
@@ -67,7 +67,7 @@ cases:
             - "VIRTUAL-MACHINE"
     cleanup:
       - incus delete test-virt-2 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 3: instance_003 - VM alpine with custom profile
@@ -103,7 +103,7 @@ cases:
             - "test-virt-3"
     cleanup:
       - incus delete test-virt-3 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 4: instance_004 - Container alpine ephemeral custom profile
@@ -133,7 +133,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-4 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 5: instance_005 - Container debian high memory
@@ -162,7 +162,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-5 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 6: instance_006 - VM ubuntu ephemeral high priority
@@ -194,7 +194,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-virt-6 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 7: instance_007 - Container ubuntu with autostart
@@ -226,7 +226,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-7 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 8: instance_008 - VM debian ephemeral custom profile
@@ -256,7 +256,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-virt-8 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 9: instance_009 - VM alpine minimal ephemeral
@@ -288,7 +288,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-virt-9 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 10: instance_010 - Container alpine with autostart priority 0
@@ -319,7 +319,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-10 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 11: instance_011 - Container ubuntu medium with custom profile
@@ -351,7 +351,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-11 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 12: instance_012 - Container alpine ephemeral high CPU
@@ -381,7 +381,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-12 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 13: instance_013 - Container debian ephemeral minimal memory
@@ -413,7 +413,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-13 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 14: instance_014 - Container alpine ephemeral low resources
@@ -445,7 +445,7 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-14 --force
-      - incus profile remove custom
+      - incus profile delete custom
 
   # ============================================================
   # CASE 15: instance_015 - Container alpine ephemeral medium
@@ -477,4 +477,4 @@ cases:
         - "changes"
     cleanup:
       - incus delete test-cont-15 --force
-      - incus profile remove custom
+      - incus profile delete custom

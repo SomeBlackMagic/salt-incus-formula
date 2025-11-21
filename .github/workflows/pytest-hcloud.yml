@@ -52,12 +52,12 @@ jobs:
           
           apt update
           apt install -y incus incus-client python3.10-venv jq
-          incus admin init --auto --network-address=[::] --network-port=8443
+          incus admin init --minimal --network-address=[::] --network-port=8443
           incus admin waitready
 
       - name: Run tests
         run: |
-            set -exuo pipefail
+            set -euo pipefail
 
             python3.10 -m venv .venv
             source .venv/bin/activate

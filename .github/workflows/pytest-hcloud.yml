@@ -52,8 +52,29 @@ jobs:
           
           apt update
           apt install -y incus incus-client python3.10-venv jq
-          incus admin init --minimal --network-address=[::] --network-port=8443
+          apt install -y thin-provisioning-tools lvm2 btrfs-progs zfsutils-linux xfsprogs e2fsprogs util-linux rsync
+          incus admin init --auto --network-address=[::] --network-port=8443
           incus admin waitready
+
+      - name: Setup env for testing
+        run: |
+          apt install -y podman lvm2 thin-provisioning-tools jq
+          
+          dd if=/dev/zero of=/var/lib/ceph-osd.img bs=1G count=1
+          losetup -fP /var/lib/ceph-osd.img
+          LOOPDEV=$(losetup -a | awk -F: '/ceph-osd/ {print $1}')
+          
+          curl -fsSL -o /usr/local/bin/cephadm https://github.com/ceph/ceph/raw/quincy/src/cephadm/cephadm
+          chmod +x /usr/local/bin/cephadm
+          
+          cephadm bootstrap \
+            --mon-ip $(hostname -I | awk '{print $1}') \
+            --single-host-mode \
+            --skip-monitoring-stack
+          
+          cephadm shell -- ceph-volume lvm create --data "$LOOPDEV"
+          
+          cephadm shell -- ceph osd pool create incus 32
 
       - name: Run tests
         run: |

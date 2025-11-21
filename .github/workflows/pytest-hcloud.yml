@@ -42,13 +42,13 @@ jobs:
           mkdir -p /etc/apt/keyrings/
           curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
           
-          echo "Enabled: yes" | sudo tee /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "Types: deb" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "URIs: https://pkgs.zabbly.com/incus/lts-6.0" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "Suites: $(. /etc/os-release && echo "${VERSION_CODENAME}")" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "Components: main" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "Architectures: $(dpkg --print-architecture)" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
-          echo "Signed-By: /etc/apt/keyrings/zabbly.asc" | sudo tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Enabled: yes" | tee /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Types: deb" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "URIs: https://pkgs.zabbly.com/incus/lts-6.0" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Suites: $(. /etc/os-release && echo "${VERSION_CODENAME}")" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Components: main" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Architectures: $(dpkg --print-architecture)" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
+          echo "Signed-By: /etc/apt/keyrings/zabbly.asc" | tee -a /etc/apt/sources.list.d/zabbly-incus-lts-6.0.sources
           
           apt update
           apt install -y incus incus-client python3.10-venv jq
@@ -57,6 +57,20 @@ jobs:
 
       - name: Setup env for testing
         run: |
+          apt update
+          apt install -y ca-certificates curl
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          . /etc/os-release
+          echo "Types: deb" | tee /etc/apt/sources.list.d/docker.sources
+          echo "URIs: https://download.docker.com/linux/ubuntu" | tee -a /etc/apt/sources.list.d/docker.sources
+          echo "Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}" | tee -a /etc/apt/sources.list.d/docker.sources
+          echo "Components: stable" | tee -a /etc/apt/sources.list.d/docker.sources
+          echo "Signed-By: /etc/apt/keyrings/docker.asc" | tee -a /etc/apt/sources.list.d/docker.sources
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          
           apt install -y podman lvm2 thin-provisioning-tools jq
           
           dd if=/dev/zero of=/var/lib/ceph-osd.img bs=1G count=1
@@ -67,8 +81,8 @@ jobs:
           chmod +x /usr/local/bin/cephadm
           
           cephadm bootstrap \
-            --mon-ip $(hostname -I | awk '{print $1}') \
-            --mon-count 1 \
+            --mon-ip "$(hostname -I | awk '{print $1}')" \
+            --single-host-defaults \
             --skip-monitoring-stack
           
           cephadm shell -- ceph -s

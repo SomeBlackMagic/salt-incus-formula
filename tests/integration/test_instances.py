@@ -1,9 +1,26 @@
+import pytest
 from conftest import (
     create_case_parametrize,
     check_json_equals,
     check_stdout_contains,
-    check_local_shell
+    check_local_shell, run_local_shell
 )
+
+from conftest import run_local_shell
+
+def setup_module(module):
+    run_local_shell("incus image copy images: ubuntu/22.04 local: --alias ubuntu-22.04")
+    run_local_shell("incus image copy images: ubuntu/22.04/cloud local: --alias ubuntu-22.04-vm")
+
+    run_local_shell("echo setup > /tmp/sm")
+    print(f"[SETUP MODULE] {module.__file__}")
+
+def teardown_module(module):
+    # run_local_shell("incus image delete ubuntu-22.04")
+    # run_local_shell("incus image delete ubuntu-22.04-vm")
+    run_local_shell("echo teardown > /tmp/tm")
+    print(f"[TEARDOWN MODULE] {module.__file__}")
+
 
 @create_case_parametrize("tests/integration/data/instances.yml")
 def test_instances_create(case, setup_environment, run_salt_command):

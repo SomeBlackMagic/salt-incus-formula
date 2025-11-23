@@ -1,10 +1,10 @@
 name: pytest on Hetzner Cloud
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+#  push:
+#    branches: [ master ]
+#  pull_request:
+#    branches: [ master ]
   workflow_dispatch:
 
 
@@ -57,43 +57,43 @@ jobs:
           incus admin init --auto --network-address=[::] --network-port=8443
           incus admin waitready
 
-      - name: Setup env for testing
-        if: vars.INSTALL_EXTS == 'true'
-        run: |
-          apt update
-          apt install -y ca-certificates curl
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          chmod a+r /etc/apt/keyrings/docker.asc
-          . /etc/os-release
-          echo "Types: deb" | tee /etc/apt/sources.list.d/docker.sources
-          echo "URIs: https://download.docker.com/linux/ubuntu" | tee -a /etc/apt/sources.list.d/docker.sources
-          echo "Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}" | tee -a /etc/apt/sources.list.d/docker.sources
-          echo "Components: stable" | tee -a /etc/apt/sources.list.d/docker.sources
-          echo "Signed-By: /etc/apt/keyrings/docker.asc" | tee -a /etc/apt/sources.list.d/docker.sources
-          apt-get update
-          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          
-          apt install -y podman lvm2 thin-provisioning-tools jq
-          
-          dd if=/dev/zero of=/var/lib/ceph-osd.img bs=1G count=1
-          losetup -fP /var/lib/ceph-osd.img
-          LOOPDEV=$(losetup -a | awk -F: '/ceph-osd/ {print $1}')
-          
-          curl -fsSL -o /usr/local/bin/cephadm https://github.com/ceph/ceph/raw/quincy/src/cephadm/cephadm
-          chmod +x /usr/local/bin/cephadm
-          
-          cephadm bootstrap \
-            --mon-ip "$(curl -s http://checkip.amazonaws.com)" \
-            --single-host-defaults \
-            --skip-monitoring-stack \
-            --skip-ssh
-          
-          cephadm shell -- ceph -s
-          
-          cephadm shell -- ceph-volume lvm create --data "$LOOPDEV"
-          
-          cephadm shell -- ceph osd pool create incus 32
+#      - name: Setup env for testing
+#        if: vars.INSTALL_EXTS == 'true'
+#        run: |
+#          apt update
+#          apt install -y ca-certificates curl
+#          install -m 0755 -d /etc/apt/keyrings
+#          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+#          chmod a+r /etc/apt/keyrings/docker.asc
+#          . /etc/os-release
+#          echo "Types: deb" | tee /etc/apt/sources.list.d/docker.sources
+#          echo "URIs: https://download.docker.com/linux/ubuntu" | tee -a /etc/apt/sources.list.d/docker.sources
+#          echo "Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}" | tee -a /etc/apt/sources.list.d/docker.sources
+#          echo "Components: stable" | tee -a /etc/apt/sources.list.d/docker.sources
+#          echo "Signed-By: /etc/apt/keyrings/docker.asc" | tee -a /etc/apt/sources.list.d/docker.sources
+#          apt-get update
+#          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+#
+#          apt install -y podman lvm2 thin-provisioning-tools jq
+#
+#          dd if=/dev/zero of=/var/lib/ceph-osd.img bs=1G count=1
+#          losetup -fP /var/lib/ceph-osd.img
+#          LOOPDEV=$(losetup -a | awk -F: '/ceph-osd/ {print $1}')
+#
+#          curl -fsSL -o /usr/local/bin/cephadm https://github.com/ceph/ceph/raw/quincy/src/cephadm/cephadm
+#          chmod +x /usr/local/bin/cephadm
+#
+#          cephadm bootstrap \
+#            --mon-ip "$(curl -s http://checkip.amazonaws.com)" \
+#            --single-host-defaults \
+#            --skip-monitoring-stack \
+#            --skip-ssh
+#
+#          cephadm shell -- ceph -s
+#
+#          cephadm shell -- ceph-volume lvm create --data "$LOOPDEV"
+#
+#          cephadm shell -- ceph osd pool create incus 32
 
 
       - name: Run tests
@@ -105,8 +105,13 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-test.txt
-          pytest || true
+          pytest --cov --cov-branch --cov-report=xml || true
 
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: SomeBlackMagic/salt-incus-formula
 
 
   delete-runner:

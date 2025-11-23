@@ -10,7 +10,7 @@ cases:
             ensure: present
             driver: dir
             config:
-              source: /var/lib/incus/storage-pools/local
+              source: /var/lib/incus/storage-pools/pool-dir
             description: Test dir storage pool
             update_config:
               volume.size: 10GiB

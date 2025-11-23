@@ -1,3 +1,4 @@
+import pytest
 from conftest import (
     create_case_parametrize,
     check_json_equals,

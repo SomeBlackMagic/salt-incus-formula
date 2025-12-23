@@ -35,14 +35,19 @@ Ensure an instance exists with a specified configuration.
 **Parameters:**
 - `name` (required): Instance name
 - `source` (optional): Source configuration for creating instance
+  - **Type**: `image` - Create from image (default)
+  - **Type**: `copy` - Copy existing instance
+  - **Type**: `migration` - Migrate instance from another host
+  - **Type**: `none` - Create empty instance without base image
 - `instance_type` (optional): "container" or "virtual-machine" (default: "container")
 - `config` (optional): Instance configuration dict
 - `devices` (optional): Device configuration dict
 - `profiles` (optional): List of profiles to apply
 - `ephemeral` (optional): Whether instance is ephemeral (default: `false`)
 
-**Example:**
+**Examples:**
 
+**Create from image:**
 ```yaml
 web-server:
   incus.instance_present:
@@ -61,6 +66,44 @@ web-server:
         eth0:
           type: nic
           network: frontend-net
+```
+
+**Create empty instance (no base image):**
+```yaml
+custom-instance:
+  incus.instance_present:
+    - source:
+        type: none
+    - instance_type: container
+    - config:
+        limits.cpu: "1"
+        limits.memory: 512MiB
+    - profiles:
+        - default
+```
+
+**Copy existing instance:**
+```yaml
+web-server-clone:
+  incus.instance_present:
+    - source:
+        type: copy
+        source: web-server
+    - config:
+        limits.cpu: "2"
+        limits.memory: 2GiB
+```
+
+**Migrate instance from remote:**
+```yaml
+migrated-instance:
+  incus.instance_present:
+    - source:
+        type: migration
+        mode: pull
+        base-image: ubuntu/22.04
+        server: https://remote-server:8443
+    - instance_type: container
 ```
 
 ### instance_absent

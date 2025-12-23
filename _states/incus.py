@@ -177,11 +177,29 @@ def instance_present(
             current_devices = instance.get("devices", {}) or {}
             device_changes = {}
             for dev_name, dev_conf in devices.items():
-                if current_devices.get(dev_name) != dev_conf:
+                current_dev = current_devices.get(dev_name, {})
+                # Deep comparison: check if device exists and all properties match
+                if not current_dev:
+                    # Device doesn't exist
                     device_changes[dev_name] = {
-                        "old": current_devices.get(dev_name),
+                        "old": None,
                         "new": dev_conf,
                     }
+                else:
+                    # Device exists, check if any property differs
+                    property_changes = {}
+                    for prop_key, prop_value in dev_conf.items():
+                        current_value = current_dev.get(prop_key)
+                        # Normalize values for comparison (convert to string)
+                        normalized_new = str(prop_value) if prop_value is not None else None
+                        normalized_current = str(current_value) if current_value is not None else None
+                        if normalized_current != normalized_new:
+                            property_changes[prop_key] = {
+                                "old": current_value,
+                                "new": prop_value,
+                            }
+                    if property_changes:
+                        device_changes[dev_name] = property_changes
             if device_changes:
                 changes["devices"] = device_changes
 
@@ -3373,11 +3391,29 @@ def profile_present(name, config=None, devices=None, description=""):
             current_devices = current_profile.get("devices", {}) or {}
             device_changes = {}
             for dev_name, dev_conf in devices.items():
-                if current_devices.get(dev_name) != dev_conf:
+                current_dev = current_devices.get(dev_name, {})
+                # Deep comparison: check if device exists and all properties match
+                if not current_dev:
+                    # Device doesn't exist
                     device_changes[dev_name] = {
-                        "old": current_devices.get(dev_name),
+                        "old": None,
                         "new": dev_conf,
                     }
+                else:
+                    # Device exists, check if any property differs
+                    property_changes = {}
+                    for prop_key, prop_value in dev_conf.items():
+                        current_value = current_dev.get(prop_key)
+                        # Normalize values for comparison (convert to string)
+                        normalized_new = str(prop_value) if prop_value is not None else None
+                        normalized_current = str(current_value) if current_value is not None else None
+                        if normalized_current != normalized_new:
+                            property_changes[prop_key] = {
+                                "old": current_value,
+                                "new": prop_value,
+                            }
+                    if property_changes:
+                        device_changes[dev_name] = property_changes
             if device_changes:
                 changes["devices"] = device_changes
 

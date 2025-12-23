@@ -531,7 +531,14 @@ def instance_update(name, config=None, devices=None, profiles=None):
         instance_data['config'].update(config)
 
     if devices:
-        instance_data['devices'].update(devices)
+        # Deep merge devices: update properties within existing devices
+        for dev_name, dev_conf in devices.items():
+            if dev_name in instance_data['devices']:
+                # Device exists, merge properties
+                instance_data['devices'][dev_name].update(dev_conf)
+            else:
+                # New device, add it
+                instance_data['devices'][dev_name] = dev_conf
 
     if profiles is not None:
         instance_data['profiles'] = profiles
@@ -2719,7 +2726,14 @@ def profile_update(name, config=None, devices=None, description=None):
         profile_data['config'].update(config)
 
     if devices:
-        profile_data['devices'].update(devices)
+        # Deep merge devices: update properties within existing devices
+        for dev_name, dev_conf in devices.items():
+            if dev_name in profile_data['devices']:
+                # Device exists, merge properties
+                profile_data['devices'][dev_name].update(dev_conf)
+            else:
+                # New device, add it
+                profile_data['devices'][dev_name] = dev_conf
 
     if description is not None:
         profile_data['description'] = description

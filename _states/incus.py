@@ -327,11 +327,13 @@ def instance_absent(name, force=False):
     return ret
 
 
-def instance_running(name):
+def instance_running(name, wait_is_ready=False, ready_timeout=300):
     """
     Ensure an instance is running.
 
     :param name: Instance name
+    :param wait_is_ready: Wait for incus-agent to be ready after starting
+    :param ready_timeout: Timeout in seconds for waiting (default: 300)
 
     Example:
 
@@ -339,6 +341,11 @@ def instance_running(name):
 
         mycontainer:
           incus.instance_running
+
+        myvm:
+          incus.instance_running:
+            - wait_is_ready: True
+            - ready_timeout: 600
     """
     ret = {
         "name": name,
@@ -359,11 +366,31 @@ def instance_running(name):
 
     if status == "Running":
         ret["comment"] = f"Instance {name} is already running"
+
+        # If wait_is_ready is set, check if agent is ready even if already running
+        if wait_is_ready:
+            if not __opts__.get("test"):
+                ready_result = __salt__["incus.instance_wait_ready"](name, timeout=ready_timeout)
+                if not ready_result.get("success"):
+                    ret["result"] = False
+                    ret["comment"] = (
+                        f"Instance {name} is running but agent is not ready: "
+                        f"{ready_result.get('error')}"
+                    )
+                else:
+                    ret["comment"] = (
+                        f"Instance {name} is running and ready "
+                        f"(waited {ready_result.get('elapsed_time', 0):.1f}s)"
+                    )
+
         return ret
 
     if __opts__.get("test"):
         ret["result"] = None
-        ret["comment"] = f"Instance {name} would be started"
+        comment = f"Instance {name} would be started"
+        if wait_is_ready:
+            comment += " and wait for agent to be ready"
+        ret["comment"] = comment
         ret["changes"] = {
             "state": {
                 "old": status,
@@ -381,6 +408,21 @@ def instance_running(name):
                 "new": "Running",
             }
         }
+
+        # Wait for instance to be ready if requested
+        if wait_is_ready:
+            ready_result = __salt__["incus.instance_wait_ready"](name, timeout=ready_timeout)
+            if not ready_result.get("success"):
+                ret["result"] = False
+                ret["comment"] = (
+                    f"Instance {name} started but agent is not ready: "
+                    f"{ready_result.get('error')}"
+                )
+            else:
+                ret["comment"] = (
+                    f"Instance {name} started and ready "
+                    f"(waited {ready_result.get('elapsed_time', 0):.1f}s)"
+                )
     else:
         ret["result"] = False
         ret["comment"] = (

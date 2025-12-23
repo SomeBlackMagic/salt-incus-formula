@@ -28,6 +28,12 @@ incus-instance-{{ inst_name }}:
 incus-instance-{{ inst_name }}-running:
   incus.instance_running:
     - name: {{ inst_name | tojson }}
+    {%- if inst.get("wait_is_ready") is not none %}
+    - wait_is_ready: {{ inst.get("wait_is_ready") | tojson }}
+    {%- endif %}
+    {%- if inst.get("ready_timeout") %}
+    - ready_timeout: {{ inst.get("ready_timeout") | tojson }}
+    {%- endif %}
     - require:
       - incus: incus-instance-{{ inst_name }}
 {%- endif %}
@@ -41,6 +47,12 @@ incus-instance-{{ inst_name }}-restarted:
       - incus: incus-instance-{{ inst_name }}
   incus.instance_running:
     - name: {{ inst_name | tojson }}
+    {%- if inst.get("wait_is_ready") is not none %}
+    - wait_is_ready: {{ inst.get("wait_is_ready") | tojson }}
+    {%- endif %}
+    {%- if inst.get("ready_timeout") %}
+    - ready_timeout: {{ inst.get("ready_timeout") | tojson }}
+    {%- endif %}
     - require:
       - incus: incus-instance-{{ inst_name }}-restarted
 {%- endif %}

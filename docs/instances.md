@@ -128,13 +128,23 @@ Ensure an instance is in a running state.
 
 **Parameters:**
 - `name` (required): Instance name
+- `wait_is_ready` (optional): Wait for incus-agent to be fully ready (default: `false`)
+- `ready_timeout` (optional): Timeout in seconds for waiting agent readiness (default: `300`)
 
 **Example:**
 
 ```yaml
 web-server:
   incus.instance_running
+
+# Wait for VM agent to be ready
+ubuntu-vm:
+  incus.instance_running:
+    - wait_is_ready: true
+    - ready_timeout: 600
 ```
+
+**Note:** The `wait_is_ready` parameter is particularly useful for virtual machines, as they need time for the incus-agent to start and become responsive. This ensures the instance is fully operational before proceeding with subsequent states.
 
 ### instance_stopped
 
@@ -190,6 +200,9 @@ incus:
         - default
         - vm-profile
       ephemeral: false
+      started: true
+      wait_is_ready: true     # Wait for incus-agent to be ready
+      ready_timeout: 600       # Wait up to 10 minutes
 ```
 
 ### Multi-Tier Application
@@ -504,6 +517,37 @@ config:
   boot.autostart.priority: "10"   # Higher priority starts first
   boot.host_shutdown_timeout: "60" # Graceful shutdown timeout
 ```
+
+### Waiting for Instance Readiness
+
+When working with virtual machines, it's important to wait for the incus-agent to become fully operational before executing subsequent states. This is especially critical for VMs that take time to boot:
+
+```yaml
+incus:
+  instances:
+    my-vm:
+      instance_type: virtual-machine
+      source:
+        type: image
+        alias: ubuntu/22.04/cloud
+      config:
+        limits.cpu: "2"
+        limits.memory: 4GiB
+      started: true
+      wait_is_ready: true      # Wait for agent to respond
+      ready_timeout: 300       # Timeout in seconds (default: 300)
+```
+
+**When to use `wait_is_ready`:**
+- **Virtual Machines**: Always recommended, as VMs need time to boot and start the agent
+- **Containers**: Usually not needed, as containers start quickly
+- **Automation**: When subsequent Salt states depend on the instance being fully operational
+- **Cloud-init**: When the instance uses cloud-init and needs time to complete initialization
+
+**Timeout recommendations:**
+- **Fast VMs**: 300 seconds (5 minutes) - default
+- **Slow VMs or cloud-init**: 600-900 seconds (10-15 minutes)
+- **Containers**: 60-120 seconds (1-2 minutes) if needed
 
 ### Naming Conventions
 

@@ -647,6 +647,63 @@ def instance_restart(name, force=False, timeout=30):
     return {'success': True, 'message': f'Instance {name} restarted successfully'}
 
 
+def instance_wait_ready(name, timeout=300, interval=2):
+    """
+    Wait for instance to be fully ready (incus-agent is responsive)
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.instance_wait_ready myvm
+        salt '*' incus.instance_wait_ready myvm timeout=600
+
+    :param name: Instance name
+    :param timeout: Maximum seconds to wait (default: 300)
+    :param interval: Poll interval in seconds (default: 2)
+    :return: Result dict with success status
+    """
+    client = _client()
+    started = time.time()
+
+    log.info(f"Waiting for instance '{name}' to become ready (timeout: {timeout}s)")
+
+    while time.time() - started < timeout:
+        # Try to execute a simple command to check if incus-agent is ready
+        data = {
+            'command': ['/bin/true'],
+            'wait-for-websocket': False,
+            'interactive': False
+        }
+
+        result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
+
+        # If exec succeeds, the agent is ready
+        if result.get('error_code') == 0:
+            elapsed = time.time() - started
+            log.info(f"Instance '{name}' is ready after {elapsed:.1f}s")
+            return {
+                'success': True,
+                'message': f'Instance {name} is ready',
+                'elapsed_time': elapsed
+            }
+
+        # Log the error for debugging
+        error_msg = result.get('error', 'Unknown error')
+        log.debug(f"Instance '{name}' not ready yet: {error_msg}")
+
+        # Wait before next check
+        time.sleep(interval)
+
+    # Timeout reached
+    elapsed = time.time() - started
+    log.warning(f"Timeout waiting for instance '{name}' to become ready ({elapsed:.1f}s)")
+    return {
+        'success': False,
+        'error': f'Timeout waiting for instance to become ready after {elapsed:.1f}s'
+    }
+
+
 # ========== Instance Snapshot Management Functions ==========
 
 def instance_snapshot_list(instance, recursion=0):

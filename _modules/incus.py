@@ -135,6 +135,10 @@ class UnixSocketPoolManager:
         # host/port/scheme are ignored — we always use unix socket
         return UnixHTTPConnectionPool(self.socket_path)
 
+    def connection_from_url(self, url, pool_kwargs=None):
+        # url is ignored — we always use unix socket
+        return UnixHTTPConnectionPool(self.socket_path)
+
 
 class UnixHTTPAdapter(HTTPAdapter):
     """

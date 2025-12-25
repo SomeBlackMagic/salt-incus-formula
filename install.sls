@@ -6,7 +6,7 @@
 {% from tpldir ~ "/map.jinja" import incus with context %}
 
 {% if incus.enable %}
-  
+
   {% set os_family = grains.get("os_family") %}
   {% set codename = grains.get("oscodename", "bookworm") %}
   {% set incus_version = incus.get("version", None) %}
@@ -38,7 +38,7 @@ incus-repo-key:
     - require:
       - file: incus-keyring-directory
 
-incus-repo-list:
+incus-repo:
   file.managed:
     - name: /etc/apt/sources.list.d/zabbly-incus-{{ repo_channel }}.sources
     - user: root
@@ -54,7 +54,7 @@ incus-repo-list:
         Signed-By: /etc/apt/keyrings/zabbly.asc
     - require:
       - file: incus-repo-key
-  {% endif %}
+{% endif %}
 
   {#- RedHat/CentOS/Fedora repository setup -#}
   {% if incus.repo.enable and os_family == "RedHat" %}
@@ -85,24 +85,27 @@ incus-package:
     - refresh: True
     {% if os_family == "Debian" %}
     - require:
-      - file: incus-repo-list
+      - file: incus-repo
     {% elif os_family == "RedHat" %}
     - require:
       - pkgrepo: incus-repo
     {% endif %}
-  {% endif %}
+    {% endif %}
 
 
-incus-database-present:
-  file.exists:
-    - name: {{ db_file }}
+incus-service:
+  service.running:
+    - name: {{ incus.service.name }}
+    - enable: {{ incus.service.enable }}
+    - require:
+      - pkg: incus-package
 
 incus-init:
   cmd.run:
     - name: incus admin init --minimal
     - unless: test -f {{ db_file }}
     - require:
-      - file: incus-database-present
+      - service: incus-service
 
   {#- Install dependencies -#}
   {% if incus.pkg.deps %}

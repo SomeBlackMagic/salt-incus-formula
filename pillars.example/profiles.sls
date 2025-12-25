@@ -360,7 +360,7 @@ incus:
       config:
         limits.cpu: "4"
         limits.memory: 8GB
-        security.secureboot: "false"
+        security.secureboot: false
         boot.autostart: "true"
       devices:
         eth0:
@@ -382,7 +382,7 @@ incus:
       config:
         limits.cpu: "16"
         limits.memory: 32GB
-        security.secureboot: "false"
+        security.secureboot: false
         migration.stateful: "true"
       devices:
         eth0:

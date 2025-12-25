@@ -95,6 +95,19 @@ def _find_image_by_alias(alias_name):
     return None
 
 
+def _normalize_config_value(value):
+    """
+    Normalize configuration value to string for comparison.
+    Converts Python boolean to lowercase string to match Incus API format.
+
+    :param value: Configuration value (can be str, bool, int, etc.)
+    :return: Normalized string value
+    """
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
 # ======================================================================
 # Instance States
 # ======================================================================
@@ -154,8 +167,9 @@ def instance_present(
             current_config = instance.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -2195,8 +2209,9 @@ def network_present(name, network_type="bridge", config=None, description=""):
             current_config = current_network.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -2391,8 +2406,9 @@ def network_acl_present(name, config=None, description="", egress=None, ingress=
             current_config = current_acl.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -2599,8 +2615,9 @@ def network_forward_present(network, listen_address, config=None, description=""
             current_config = current_forward.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -2795,8 +2812,9 @@ def network_peer_present(network, peer_name, config=None, description="", target
             current_config = current_peer.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -2997,8 +3015,9 @@ def network_zone_present(zone, config=None, description=""):
             current_config = current_zone.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -3175,8 +3194,9 @@ def network_zone_record_present(zone, record_name, config=None, description="", 
             current_config = current_record.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -3419,8 +3439,9 @@ def profile_present(name, config=None, devices=None, description=""):
             current_config = current_profile.get("config", {}) or {}
             config_changes = {}
             for key, value in config.items():
-                new_val = str(value)
-                if current_config.get(key) != new_val:
+                new_val = _normalize_config_value(value)
+                current_val = _normalize_config_value(current_config.get(key, ""))
+                if current_val != new_val:
                     config_changes[key] = {
                         "old": current_config.get(key),
                         "new": new_val,
@@ -3647,8 +3668,9 @@ def profile_config(name, config, description=None):
     # Check what needs to be updated
     config_changes = {}
     for key, value in (config or {}).items():
-        new_val = str(value)
-        if current_config.get(key) != new_val:
+        new_val = _normalize_config_value(value)
+        current_val = _normalize_config_value(current_config.get(key, ""))
+        if current_val != new_val:
             config_changes[key] = {"old": current_config.get(key), "new": new_val}
 
     description_changed = description is not None and current_description != description

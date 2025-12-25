@@ -195,7 +195,7 @@ incus:
       config:
         limits.cpu: "4"
         limits.memory: 8GiB
-        security.secureboot: "false"
+        security.secureboot: false
       profiles:
         - default
         - vm-profile

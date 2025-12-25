@@ -11,7 +11,7 @@
   {% set codename = grains.get("oscodename", "bookworm") %}
   {% set incus_version = incus.get("version", None) %}
   {% set pkg_name = incus.pkg.get("name", "incus") %}
-  {% set db_file = '/var/lib/incus/database/global/db.bin' %}
+  {% set db_file = '/var/lib/incus/database/local.db' %}
 
   {#- Debian/Ubuntu repository setup -#}
   {% if incus.repo.enable and os_family == "Debian" %}

@@ -4131,14 +4131,13 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
     log.info(f"Waiting for cloud-init to complete on instance '{name}' (timeout: {timeout}s)")
 
     while time.time() - started < timeout:
-        # Execute cloud-init status --wait command with short timeout
-        # This command blocks until cloud-init finishes or times out
+        # Check cloud-init status using exit code approach (without --wait to avoid blocking)
+        # cloud-init status returns exit code 0 when done/disabled, 1 when running, 2 when error
         data = {
-            'command': ['sh', '-c', 'cloud-init status --format=json 2>/dev/null || echo "{}"'],
+            'command': ['cloud-init', 'status'],
             'wait-for-websocket': False,
             'interactive': False,
-            'environment': {},
-            'record-output': True
+            'environment': {}
         }
 
         try:
@@ -4149,61 +4148,59 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
                 time.sleep(interval)
                 continue
 
+            # Get the return code from metadata
             metadata = result.get('metadata', {})
             return_code = metadata.get('return', -1)
 
-            # Try to get the stdout from the operation
-            # We need to fetch the operation output logs
-            operation_id = result.get('operation', '')
-            if operation_id:
-                # Get operation details with output
-                op_result = client._request('GET', operation_id + '?recursion=1')
-                if op_result.get('error_code') == 0:
-                    op_metadata = op_result.get('metadata', {})
-                    op_meta = op_metadata.get('metadata', {})
-                    output_data = op_meta.get('output', {})
+            log.debug(f"cloud-init status return code on '{name}': {return_code}")
 
-                    # cloud-init status --format=json outputs JSON with status
-                    stdout_log = output_data.get('1', {})  # stdout is typically fd 1
-                    if stdout_log:
-                        try:
-                            import json as json_module
-                            status_json = json_module.loads(stdout_log)
-                            status = status_json.get('status', 'unknown')
+            # cloud-init status return codes:
+            # 0 = done or disabled
+            # 1 = still running
+            # 2 = error occurred
+            if return_code == 0:
+                # Check if it's done or disabled by looking at the marker file
+                check_data = {
+                    'command': ['test', '-f', '/run/cloud-init/result.json'],
+                    'wait-for-websocket': False,
+                    'interactive': False,
+                    'environment': {}
+                }
+                check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
 
-                            log.debug(f"cloud-init status on '{name}': {status}")
+                # If result.json exists, cloud-init ran
+                if check_result.get('error_code') == 0 and check_result.get('metadata', {}).get('return') == 0:
+                    elapsed = time.time() - started
+                    log.info(f"cloud-init completed successfully on '{name}' after {elapsed:.1f}s")
+                    return {
+                        'success': True,
+                        'status': 'done',
+                        'message': f'cloud-init completed successfully on {name}',
+                        'elapsed_time': elapsed
+                    }
+                else:
+                    # cloud-init is disabled
+                    return {
+                        'success': True,
+                        'status': 'disabled',
+                        'message': 'cloud-init is disabled on this instance'
+                    }
 
-                            if status == 'done':
-                                elapsed = time.time() - started
-                                log.info(f"cloud-init completed successfully on '{name}' after {elapsed:.1f}s")
-                                return {
-                                    'success': True,
-                                    'status': 'done',
-                                    'message': f'cloud-init completed successfully on {name}',
-                                    'elapsed_time': elapsed,
-                                    'details': status_json
-                                }
-                            elif status == 'error':
-                                elapsed = time.time() - started
-                                error_detail = status_json.get('errors', ['Unknown error'])
-                                log.warning(f"cloud-init failed on '{name}': {error_detail}")
-                                return {
-                                    'success': False,
-                                    'status': 'error',
-                                    'error': f'cloud-init completed with errors: {error_detail}',
-                                    'elapsed_time': elapsed,
-                                    'details': status_json
-                                }
-                            elif status == 'disabled':
-                                return {
-                                    'success': True,
-                                    'status': 'disabled',
-                                    'message': 'cloud-init is disabled on this instance'
-                                }
-                            # Status is 'running' or other, continue waiting
+            elif return_code == 2:
+                # Error state
+                elapsed = time.time() - started
+                error_msg = 'cloud-init completed with errors (check /var/log/cloud-init.log for details)'
 
-                        except (json_module.JSONDecodeError, KeyError) as e:
-                            log.debug(f"Failed to parse cloud-init status JSON on '{name}': {e}")
+                log.warning(f"cloud-init failed on '{name}': {error_msg}")
+                return {
+                    'success': False,
+                    'status': 'error',
+                    'error': error_msg,
+                    'elapsed_time': elapsed
+                }
+
+            # Return code 1 - still running, continue waiting
+            log.debug(f"cloud-init still running on '{name}', waiting...")
 
         except Exception as e:
             log.debug(f"Exception while checking cloud-init status on '{name}': {str(e)}")

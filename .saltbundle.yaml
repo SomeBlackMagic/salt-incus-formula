@@ -1,5 +1,5 @@
 name: incus
-version: 0.2.4
+version: 0.3.0
 description: Incus virtualization formula
 maintainers:
   - name: Developer

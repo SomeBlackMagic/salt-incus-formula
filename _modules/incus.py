@@ -3994,3 +3994,228 @@ def settings_replace(config):
         return {'success': False, 'error': result.get('error', 'Failed to replace settings')}
 
     return {'success': True, 'message': 'Server settings replaced successfully'}
+
+
+# ========== Cloud-init Status Functions ==========
+
+def instance_check_cloudinit_enabled(name):
+    """
+    Check if cloud-init is enabled in the instance.
+
+    This function checks if cloud-init package is installed by trying to execute
+    'cloud-init --version' command inside the instance.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.instance_check_cloudinit_enabled myvm
+
+    :param name: Instance name
+    :return: Result dict with success status and enabled flag
+    """
+    client = _client()
+
+    # Try to execute cloud-init --version command
+    data = {
+        'command': ['cloud-init', '--version'],
+        'wait-for-websocket': False,
+        'interactive': False,
+        'environment': {}
+    }
+
+    try:
+        result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
+
+        # If command succeeds (exit code 0), cloud-init is installed
+        if result.get('error_code') == 0:
+            return {
+                'success': True,
+                'enabled': True,
+                'message': 'cloud-init is installed and available'
+            }
+        else:
+            # Command failed, cloud-init is not available
+            return {
+                'success': True,
+                'enabled': False,
+                'message': 'cloud-init is not installed or not available'
+            }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f'Failed to check cloud-init status: {str(e)}'
+        }
+
+
+def instance_get_cloudinit_status(name):
+    """
+    Get cloud-init status from the instance.
+
+    This function executes 'cloud-init status' command inside the instance
+    to get the current cloud-init status.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.instance_get_cloudinit_status myvm
+
+    :param name: Instance name
+    :return: Result dict with success status, cloud-init status and details
+    """
+    client = _client()
+
+    # Execute cloud-init status command
+    data = {
+        'command': ['cloud-init', 'status'],
+        'wait-for-websocket': False,
+        'interactive': False,
+        'environment': {},
+        'record-output': True
+    }
+
+    try:
+        result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
+
+        if result.get('error_code') != 0:
+            return {
+                'success': False,
+                'error': f"Failed to execute cloud-init status: {result.get('error', 'Unknown error')}"
+            }
+
+        # Get the operation metadata to extract output
+        metadata = result.get('metadata', {})
+        return_code = metadata.get('return', -1)
+
+        # Parse status from output
+        # cloud-init status returns different statuses: done, running, error, disabled
+        # We need to get the actual output to determine the status
+        output = metadata.get('output', {})
+
+        return {
+            'success': True,
+            'return_code': return_code,
+            'metadata': metadata
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f'Failed to get cloud-init status: {str(e)}'
+        }
+
+
+def instance_wait_cloudinit(name, timeout=600, interval=5):
+    """
+    Wait for cloud-init to complete in the instance.
+
+    This function polls cloud-init status until it completes (done or error)
+    or timeout is reached.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.instance_wait_cloudinit myvm
+        salt '*' incus.instance_wait_cloudinit myvm timeout=900 interval=10
+
+    :param name: Instance name
+    :param timeout: Maximum seconds to wait (default: 600)
+    :param interval: Poll interval in seconds (default: 5)
+    :return: Result dict with success status and cloud-init result
+    """
+    client = _client()
+    started = time.time()
+
+    log.info(f"Waiting for cloud-init to complete on instance '{name}' (timeout: {timeout}s)")
+
+    while time.time() - started < timeout:
+        # Execute cloud-init status --wait command with short timeout
+        # This command blocks until cloud-init finishes or times out
+        data = {
+            'command': ['sh', '-c', 'cloud-init status --format=json 2>/dev/null || echo "{}"'],
+            'wait-for-websocket': False,
+            'interactive': False,
+            'environment': {},
+            'record-output': True
+        }
+
+        try:
+            result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
+
+            if result.get('error_code') != 0:
+                log.debug(f"Failed to execute cloud-init status on '{name}': {result.get('error')}")
+                time.sleep(interval)
+                continue
+
+            metadata = result.get('metadata', {})
+            return_code = metadata.get('return', -1)
+
+            # Try to get the stdout from the operation
+            # We need to fetch the operation output logs
+            operation_id = result.get('operation', '')
+            if operation_id:
+                # Get operation details with output
+                op_result = client._request('GET', operation_id + '?recursion=1')
+                if op_result.get('error_code') == 0:
+                    op_metadata = op_result.get('metadata', {})
+                    op_meta = op_metadata.get('metadata', {})
+                    output_data = op_meta.get('output', {})
+
+                    # cloud-init status --format=json outputs JSON with status
+                    stdout_log = output_data.get('1', {})  # stdout is typically fd 1
+                    if stdout_log:
+                        try:
+                            import json as json_module
+                            status_json = json_module.loads(stdout_log)
+                            status = status_json.get('status', 'unknown')
+
+                            log.debug(f"cloud-init status on '{name}': {status}")
+
+                            if status == 'done':
+                                elapsed = time.time() - started
+                                log.info(f"cloud-init completed successfully on '{name}' after {elapsed:.1f}s")
+                                return {
+                                    'success': True,
+                                    'status': 'done',
+                                    'message': f'cloud-init completed successfully on {name}',
+                                    'elapsed_time': elapsed,
+                                    'details': status_json
+                                }
+                            elif status == 'error':
+                                elapsed = time.time() - started
+                                error_detail = status_json.get('errors', ['Unknown error'])
+                                log.warning(f"cloud-init failed on '{name}': {error_detail}")
+                                return {
+                                    'success': False,
+                                    'status': 'error',
+                                    'error': f'cloud-init completed with errors: {error_detail}',
+                                    'elapsed_time': elapsed,
+                                    'details': status_json
+                                }
+                            elif status == 'disabled':
+                                return {
+                                    'success': True,
+                                    'status': 'disabled',
+                                    'message': 'cloud-init is disabled on this instance'
+                                }
+                            # Status is 'running' or other, continue waiting
+
+                        except (json_module.JSONDecodeError, KeyError) as e:
+                            log.debug(f"Failed to parse cloud-init status JSON on '{name}': {e}")
+
+        except Exception as e:
+            log.debug(f"Exception while checking cloud-init status on '{name}': {str(e)}")
+
+        # Wait before next check
+        time.sleep(interval)
+
+    # Timeout reached
+    elapsed = time.time() - started
+    log.warning(f"Timeout waiting for cloud-init on instance '{name}' ({elapsed:.1f}s)")
+    return {
+        'success': False,
+        'status': 'timeout',
+        'error': f'Timeout waiting for cloud-init to complete after {elapsed:.1f}s'
+    }

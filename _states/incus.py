@@ -4208,3 +4208,134 @@ def settings_managed(name, config):
         ret["comment"] = f"Failed to replace server settings: {replace_result.get('error')}"
 
     return ret
+
+
+# ======================================================================
+# Cloud-init State Functions
+# ======================================================================
+
+def instance_initialized(name, timeout=600, check_interval=5):
+    """
+    Ensure an instance has completed cloud-init initialization.
+
+    This state checks if cloud-init is enabled on the instance. If cloud-init
+    is not installed or available, the state is skipped. If cloud-init is
+    enabled, the state waits for cloud-init to complete successfully.
+
+    The state is idempotent and can be run multiple times safely.
+
+    :param name: Instance name
+    :param timeout: Maximum seconds to wait for cloud-init (default: 600)
+    :param check_interval: Poll interval in seconds (default: 5)
+
+    Example:
+
+    .. code-block:: yaml
+
+        myvm:
+          incus.instance_initialized:
+            - timeout: 900
+            - check_interval: 10
+
+        myvm-with-deps:
+          incus.instance_initialized:
+            - require:
+              - incus: myvm
+
+    Returns:
+        dict: State return dictionary with result, changes, and comment
+    """
+    ret = {
+        "name": name,
+        "result": True,
+        "changes": {},
+        "comment": "",
+    }
+
+    # Check if instance exists
+    instance_info = __salt__["incus.instance_get"](name)
+
+    if not instance_info.get("success"):
+        ret["result"] = False
+        ret["comment"] = f"Instance {name} does not exist"
+        return ret
+
+    instance = instance_info.get("instance", {}) or {}
+    status = instance.get("status", "")
+
+    # Check if instance is running
+    if status != "Running":
+        ret["result"] = False
+        ret["comment"] = f"Instance {name} is not running (status: {status}). Cannot check cloud-init status."
+        return ret
+
+    # Check if cloud-init is enabled/installed
+    if __opts__.get("test"):
+        ret["result"] = None
+        ret["comment"] = f"Would check if cloud-init is enabled on instance {name}"
+        return ret
+
+    cloudinit_check = __salt__["incus.instance_check_cloudinit_enabled"](name)
+
+    if not cloudinit_check.get("success"):
+        ret["result"] = False
+        ret["comment"] = f"Failed to check cloud-init status on {name}: {cloudinit_check.get('error')}"
+        return ret
+
+    if not cloudinit_check.get("enabled"):
+        ret["comment"] = f"Instance {name} does not have cloud-init installed. Skipping initialization check."
+        return ret
+
+    # cloud-init is enabled, wait for it to complete
+    log.info(f"cloud-init is enabled on {name}, waiting for completion...")
+
+    wait_result = __salt__["incus.instance_wait_cloudinit"](
+        name, timeout=timeout, interval=check_interval
+    )
+
+    if not wait_result.get("success"):
+        status = wait_result.get("status", "unknown")
+        error = wait_result.get("error", "Unknown error")
+
+        if status == "error":
+            # cloud-init completed but with errors
+            ret["result"] = False
+            ret["comment"] = f"cloud-init on instance {name} completed with errors: {error}"
+            ret["changes"] = {
+                "cloud-init": {
+                    "status": "error",
+                    "details": wait_result.get("details", {}),
+                }
+            }
+        elif status == "timeout":
+            # Timeout waiting for cloud-init
+            ret["result"] = False
+            ret["comment"] = f"Timeout waiting for cloud-init on instance {name}: {error}"
+        else:
+            # Other failure
+            ret["result"] = False
+            ret["comment"] = f"Failed to wait for cloud-init on instance {name}: {error}"
+
+        return ret
+
+    # cloud-init completed successfully
+    status = wait_result.get("status", "unknown")
+    elapsed_time = wait_result.get("elapsed_time", 0)
+
+    if status == "done":
+        ret["comment"] = (
+            f"cloud-init completed successfully on instance {name} "
+            f"(waited {elapsed_time:.1f}s)"
+        )
+        ret["changes"] = {
+            "cloud-init": {
+                "status": "done",
+                "elapsed_time": f"{elapsed_time:.1f}s",
+            }
+        }
+    elif status == "disabled":
+        ret["comment"] = f"cloud-init is disabled on instance {name}"
+    else:
+        ret["comment"] = f"cloud-init status on instance {name}: {status}"
+
+    return ret

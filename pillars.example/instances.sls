@@ -75,6 +75,37 @@ incus:
       profiles:
         - default
       ephemeral: false
+      started: true
+      wait_is_ready: true
+      ready_timeout: 600
+
+    # VM with cloud-init - wait for initialization to complete
+    ubuntu-cloud-vm:
+      instance_type: virtual-machine
+      source:
+        type: image
+        alias: ubuntu/22.04/cloud
+      config:
+        limits.cpu: "4"
+        limits.memory: 8GiB
+        cloud-init.user-data: |
+          #cloud-config
+          packages:
+            - nginx
+            - postgresql
+          runcmd:
+            - systemctl enable nginx
+            - systemctl start nginx
+      profiles:
+        - default
+      ephemeral: false
+      started: true
+      wait_is_ready: true
+      ready_timeout: 600
+      # Wait for cloud-init to complete
+      wait_cloudinit: true
+      cloudinit_timeout: 900  # 15 minutes for package installation
+      cloudinit_check_interval: 10
 
 # ======================================================================
 # Instance Management Patterns
@@ -494,6 +525,14 @@ incus_absent_instances:
 #   - security.privileged: Run as privileged
 #   - migration.stateful: Enable stateful migration
 #
+# State Management Options:
+#   - started: true/false - Ensure instance is started
+#   - wait_is_ready: true/false - Wait for incus-agent to be ready
+#   - ready_timeout: seconds - Timeout for agent readiness (default: 300)
+#   - wait_cloudinit: true/false - Wait for cloud-init completion
+#   - cloudinit_timeout: seconds - Timeout for cloud-init (default: 600)
+#   - cloudinit_check_interval: seconds - Poll interval (default: 5)
+#
 # Profiles:
 #   - Applied to instance at creation
 #   - Can stack multiple profiles
@@ -523,5 +562,9 @@ incus_absent_instances:
 #   - Regular snapshots before changes
 #   - Monitor resource usage
 #   - Plan for high availability
+#   - Use wait_is_ready for VMs to ensure agent is responsive
+#   - Use wait_cloudinit for cloud-init VMs to catch errors early
+#   - Set appropriate timeouts based on expected initialization time
+#   - Chain state dependencies when configuration depends on cloud-init
 #
 # ======================================================================

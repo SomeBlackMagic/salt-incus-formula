@@ -38,6 +38,23 @@ incus-instance-{{ inst_name }}-running:
       - incus: incus-instance-{{ inst_name }}
 {%- endif %}
 
+{%- if inst.get("wait_cloudinit") %}
+incus-instance-{{ inst_name }}-initialized:
+  incus.instance_initialized:
+    - name: {{ inst_name | tojson }}
+    {%- if inst.get("cloudinit_timeout") %}
+    - timeout: {{ inst.get("cloudinit_timeout") | tojson }}
+    {%- endif %}
+    {%- if inst.get("cloudinit_check_interval") %}
+    - check_interval: {{ inst.get("cloudinit_check_interval") | tojson }}
+    {%- endif %}
+    - require:
+      - incus: incus-instance-{{ inst_name }}
+      {%- if inst.get("started") %}
+      - incus: incus-instance-{{ inst_name }}-running
+      {%- endif %}
+{%- endif %}
+
 {%- if inst.get("restarted") %}
 incus-instance-{{ inst_name }}-restarted:
   incus.instance_stopped:

@@ -162,6 +162,106 @@ maintenance-container:
     - force: true
 ```
 
+### instance_initialized
+
+Ensure an instance has completed cloud-init initialization.
+
+This state checks if cloud-init is installed on the instance. If cloud-init is not available, the state is skipped (no changes). If cloud-init is enabled, the state waits for cloud-init to complete successfully.
+
+The state is idempotent and can be run multiple times safely. It's particularly useful for:
+- Ensuring VMs with cloud-init have completed their initial setup
+- Detecting cloud-init errors early in the deployment process
+- Coordinating dependent states that need the instance to be fully initialized
+
+**Parameters:**
+- `name` (required): Instance name
+- `timeout` (optional): Maximum seconds to wait for cloud-init completion (default: `600`)
+- `check_interval` (optional): Poll interval in seconds (default: `5`)
+
+**Behavior:**
+- **cloud-init not installed**: State succeeds with no changes (skipped)
+- **cloud-init successful**: State succeeds with changes showing completion time
+- **cloud-init error**: State fails with error details from cloud-init
+- **cloud-init timeout**: State fails if timeout is reached before completion
+
+**Examples:**
+
+```yaml
+# Basic usage
+ubuntu-vm:
+  incus.instance_initialized
+
+# With custom timeout
+ubuntu-vm:
+  incus.instance_initialized:
+    - timeout: 900         # Wait up to 15 minutes
+    - check_interval: 10   # Check every 10 seconds
+
+# With dependencies
+database-vm:
+  incus.instance_present:
+    - source:
+        type: image
+        alias: ubuntu/22.04/cloud
+    - instance_type: virtual-machine
+    - config:
+        limits.cpu: "4"
+        limits.memory: 8GiB
+    - started: true
+
+database-vm-ready:
+  incus.instance_initialized:
+    - name: database-vm
+    - timeout: 600
+    - require:
+      - incus: database-vm
+
+configure-database:
+  cmd.run:
+    - name: incus exec database-vm -- /opt/setup-database.sh
+    - require:
+      - incus: database-vm-ready
+```
+
+**State Return Values:**
+
+Success (cloud-init completed):
+```python
+{
+    'result': True,
+    'changes': {
+        'cloud-init': {
+            'status': 'done',
+            'elapsed_time': '45.3s'
+        }
+    },
+    'comment': 'cloud-init completed successfully on instance myvm (waited 45.3s)'
+}
+```
+
+Success (cloud-init not installed):
+```python
+{
+    'result': True,
+    'changes': {},
+    'comment': 'Instance myvm does not have cloud-init installed. Skipping initialization check.'
+}
+```
+
+Failure (cloud-init error):
+```python
+{
+    'result': False,
+    'changes': {
+        'cloud-init': {
+            'status': 'error',
+            'details': {'errors': ['Failed to fetch metadata', ...]}
+        }
+    },
+    'comment': 'cloud-init on instance myvm completed with errors: [...]'
+}
+```
+
 ## Configuration Examples
 
 ### Basic Container
@@ -203,6 +303,43 @@ incus:
       started: true
       wait_is_ready: true     # Wait for incus-agent to be ready
       ready_timeout: 600       # Wait up to 10 minutes
+```
+
+### Virtual Machine with Cloud-Init
+
+```yaml
+incus:
+  instances:
+    ubuntu-cloud-vm:
+      instance_type: virtual-machine
+      source:
+        type: image
+        alias: ubuntu/22.04/cloud
+      config:
+        limits.cpu: "4"
+        limits.memory: 8GiB
+        cloud-init.user-data: |
+          #cloud-config
+          packages:
+            - nginx
+            - postgresql
+          runcmd:
+            - systemctl enable nginx
+            - systemctl start nginx
+      profiles:
+        - default
+      started: true
+      wait_is_ready: true
+      ready_timeout: 600
+
+# In your SLS file, ensure cloud-init completes:
+ubuntu-cloud-vm-initialized:
+  incus.instance_initialized:
+    - name: ubuntu-cloud-vm
+    - timeout: 900              # cloud-init may take longer
+    - check_interval: 10
+    - require:
+      - incus: ubuntu-cloud-vm
 ```
 
 ### Multi-Tier Application
@@ -549,6 +686,57 @@ incus:
 - **Slow VMs or cloud-init**: 600-900 seconds (10-15 minutes)
 - **Containers**: 60-120 seconds (1-2 minutes) if needed
 
+### Cloud-Init Initialization
+
+When using cloud-init with your instances, especially VMs, it's important to wait for cloud-init to complete before running dependent states. The `instance_initialized` state provides this functionality:
+
+```yaml
+# Create VM with cloud-init configuration
+app-vm:
+  incus.instance_present:
+    - source:
+        type: image
+        alias: ubuntu/22.04/cloud
+    - instance_type: virtual-machine
+    - config:
+        limits.cpu: "2"
+        limits.memory: 4GiB
+        cloud-init.user-data: |
+          #cloud-config
+          packages:
+            - docker.io
+            - nginx
+    - started: true
+
+# Wait for cloud-init to complete
+app-vm-initialized:
+  incus.instance_initialized:
+    - name: app-vm
+    - timeout: 900          # Allow time for package installation
+    - check_interval: 10
+    - require:
+      - incus: app-vm
+
+# Run configuration only after cloud-init completes
+configure-app:
+  cmd.run:
+    - name: incus exec app-vm -- /opt/configure-app.sh
+    - require:
+      - incus: app-vm-initialized
+```
+
+**Benefits:**
+- **Error Detection**: Catches cloud-init failures early in the deployment process
+- **Coordination**: Ensures dependent states run only after initialization is complete
+- **Idempotency**: Can be safely run multiple times
+- **Skipping**: Automatically skips if cloud-init is not installed
+
+**Best practices for cloud-init with instances:**
+1. **Set appropriate timeout**: Cloud-init with package installation may take 10-15 minutes
+2. **Use with VMs**: Especially important for VMs that use cloud images
+3. **Chain dependencies**: Use `require` to ensure proper order of operations
+4. **Handle errors**: Check state results and logs if initialization fails
+
 ### Naming Conventions
 
 Use descriptive, consistent names:
@@ -670,6 +858,59 @@ watch -n 2 incus list
    incus exec <instance> -- ps aux --sort=-%mem | head
    ```
 
+### Cloud-Init Failures
+
+**Problem**: `instance_initialized` state fails or times out
+
+**Solutions**:
+
+1. Check cloud-init status manually:
+   ```bash
+   incus exec <instance> -- cloud-init status
+   incus exec <instance> -- cloud-init status --long
+   ```
+
+2. View cloud-init logs:
+   ```bash
+   incus exec <instance> -- cat /var/log/cloud-init.log
+   incus exec <instance> -- cat /var/log/cloud-init-output.log
+   ```
+
+3. Check for specific errors:
+   ```bash
+   incus exec <instance> -- journalctl -u cloud-init
+   incus exec <instance> -- cloud-init analyze show
+   ```
+
+4. Verify cloud-init configuration:
+   ```bash
+   incus exec <instance> -- cloud-init schema --system
+   ```
+
+5. Increase timeout if cloud-init takes longer than expected:
+   ```yaml
+   myvm-initialized:
+     incus.instance_initialized:
+       - name: myvm
+       - timeout: 1200  # Increase to 20 minutes
+   ```
+
+6. If cloud-init is not needed, remove it or disable it:
+   ```yaml
+   config:
+     cloud-init.user-data: |
+       #cloud-config
+       # Disable cloud-init after first run
+       bootcmd:
+         - cloud-init-per once disable-cloudinit touch /etc/cloud/cloud-init.disabled
+   ```
+
+**Common cloud-init errors:**
+- **Metadata service unavailable**: Check network connectivity
+- **Package installation failures**: Check apt/yum repositories
+- **Script execution errors**: Review cloud-init logs for command failures
+- **Timeout waiting for network**: Verify network configuration
+
 ### Network Connectivity Issues
 
 **Problem**: Instance cannot reach network
@@ -747,5 +988,9 @@ watch -n 2 incus list
 ## See Also
 
 - Pillar example: `pillars.example/instances.sls`
-- State module: `_states/incus.py` (lines 101-440)
+- State module: `_states/incus.py`
+  - Instance states: lines 115-520
+  - Cloud-init state: `instance_initialized` function (lines 4217-4341)
+- Execution module: `_modules/incus.py`
+  - Cloud-init functions: lines 4001-4221
 - Instances state: `instances.sls`

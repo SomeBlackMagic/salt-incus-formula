@@ -4110,8 +4110,8 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
     """
     Wait for cloud-init to complete in the instance.
 
-    This function polls cloud-init status until it completes (done or error)
-    or timeout is reached.
+    This function polls cloud-init completion by checking marker files,
+    avoiding potentially blocking commands.
 
     CLI Example:
 
@@ -4131,46 +4131,44 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
     log.info(f"Waiting for cloud-init to complete on instance '{name}' (timeout: {timeout}s)")
 
     while time.time() - started < timeout:
-        # Check cloud-init status using exit code approach (without --wait to avoid blocking)
-        # cloud-init status returns exit code 0 when done/disabled, 1 when running, 2 when error
-        data = {
-            'command': ['cloud-init', 'status'],
-            'wait-for-websocket': False,
-            'interactive': False,
-            'environment': {}
-        }
-
         try:
-            result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
+            # Check for boot-finished marker file - this is the most reliable indicator
+            # that cloud-init has completed (successfully or with errors)
+            check_data = {
+                'command': ['test', '-f', '/var/lib/cloud/instance/boot-finished'],
+                'wait-for-websocket': False,
+                'interactive': False,
+                'environment': {}
+            }
 
-            if result.get('error_code') != 0:
-                log.debug(f"Failed to execute cloud-init status on '{name}': {result.get('error')}")
+            check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
+
+            if check_result.get('error_code') != 0:
+                log.debug(f"Failed to check cloud-init marker on '{name}': {check_result.get('error')}")
                 time.sleep(interval)
                 continue
 
             # Get the return code from metadata
-            metadata = result.get('metadata', {})
+            metadata = check_result.get('metadata', {})
             return_code = metadata.get('return', -1)
 
-            log.debug(f"cloud-init status return code on '{name}': {return_code}")
-
-            # cloud-init status return codes:
-            # 0 = done or disabled
-            # 1 = still running
-            # 2 = error occurred
+            # If boot-finished exists (return code 0), cloud-init has completed
             if return_code == 0:
-                # Check if it's done or disabled by looking at the marker file
-                check_data = {
-                    'command': ['test', '-f', '/run/cloud-init/result.json'],
+                # Now check if it completed successfully or with errors
+                # Check result.json for errors
+                error_check_data = {
+                    'command': ['sh', '-c', 'test -f /run/cloud-init/result.json && grep -q \'"errors": \\[\\]\' /run/cloud-init/result.json'],
                     'wait-for-websocket': False,
                     'interactive': False,
                     'environment': {}
                 }
-                check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
 
-                # If result.json exists, cloud-init ran
-                if check_result.get('error_code') == 0 and check_result.get('metadata', {}).get('return') == 0:
-                    elapsed = time.time() - started
+                error_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=error_check_data)
+
+                elapsed = time.time() - started
+
+                if error_result.get('error_code') == 0 and error_result.get('metadata', {}).get('return') == 0:
+                    # No errors - success
                     log.info(f"cloud-init completed successfully on '{name}' after {elapsed:.1f}s")
                     return {
                         'success': True,
@@ -4179,27 +4177,16 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
                         'elapsed_time': elapsed
                     }
                 else:
-                    # cloud-init is disabled
+                    # Has errors
+                    log.warning(f"cloud-init completed with errors on '{name}'")
                     return {
-                        'success': True,
-                        'status': 'disabled',
-                        'message': 'cloud-init is disabled on this instance'
+                        'success': False,
+                        'status': 'error',
+                        'error': 'cloud-init completed with errors (check /var/log/cloud-init.log for details)',
+                        'elapsed_time': elapsed
                     }
 
-            elif return_code == 2:
-                # Error state
-                elapsed = time.time() - started
-                error_msg = 'cloud-init completed with errors (check /var/log/cloud-init.log for details)'
-
-                log.warning(f"cloud-init failed on '{name}': {error_msg}")
-                return {
-                    'success': False,
-                    'status': 'error',
-                    'error': error_msg,
-                    'elapsed_time': elapsed
-                }
-
-            # Return code 1 - still running, continue waiting
+            # boot-finished doesn't exist yet - still running
             log.debug(f"cloud-init still running on '{name}', waiting...")
 
         except Exception as e:

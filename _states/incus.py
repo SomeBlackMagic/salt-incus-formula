@@ -4333,6 +4333,9 @@ def instance_initialized(name, timeout=600, check_interval=5):
                 "elapsed_time": f"{elapsed_time:.1f}s",
             }
         }
+    elif status == "already_completed":
+        ret["comment"] = f"cloud-init was already completed on instance {name}"
+        # No changes - cloud-init was completed before this state run
     elif status == "disabled":
         ret["comment"] = f"cloud-init is disabled on instance {name}"
     else:

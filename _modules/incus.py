@@ -4048,12 +4048,54 @@ def instance_check_cloudinit_enabled(name):
         }
 
 
+def _check_cloudinit_boot_finished(client, name):
+    """
+    Internal helper to check if a cloud-init boot-finished marker exists.
+
+    :param client: Incus client instance
+    :param name: Instance name
+    :return: Tuple (completed: bool, error: str or None)
+    """
+    try:
+        check_data = {
+            'command': ['test', '-f', '/var/lib/cloud/instance/boot-finished'],
+            'wait-for-websocket': False,
+            'interactive': False,
+            'environment': {}
+        }
+
+        check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
+
+        # DEBUG: Log API response
+        log.debug(f"API error_code={check_result.get('error_code')}, metadata_present={check_result.get('metadata') is not None}")
+
+        if check_result.get('error_code') != 0:
+            error_msg = f"Failed to check cloud-init marker: {check_result.get('error')}"
+            log.debug(f"Failed to check cloud-init marker on '{name}': {check_result.get('error')}")
+            return (False, error_msg)
+
+        # Get the return code from metadata
+        # Note: Incus API returns nested structure: result['metadata']['metadata']['return']
+        metadata = check_result.get('metadata', {})
+        inner_metadata = metadata.get('metadata', {})
+        return_code = inner_metadata.get('return', -1)
+
+        # DEBUG: Log metadata details
+        log.debug(f"return_code={return_code}, inner_metadata_keys={list(inner_metadata.keys()) if inner_metadata else []}")
+
+        # Return code 0 means file exists (cloud-init completed)
+        return (return_code == 0, None)
+
+    except Exception as e:
+        log.debug(f"Exception while checking cloud-init status on '{name}': {str(e)}")
+        return (False, str(e))
+
+
 def instance_get_cloudinit_status(name):
     """
     Get cloud-init status from the instance.
 
-    This function executes 'cloud-init status' command inside the instance
-    to get the current cloud-init status.
+    This function checks if cloud-init has completed by checking the boot-finished marker file.
 
     CLI Example:
 
@@ -4062,48 +4104,23 @@ def instance_get_cloudinit_status(name):
         salt '*' incus.instance_get_cloudinit_status myvm
 
     :param name: Instance name
-    :return: Result dict with success status, cloud-init status and details
+    :return: Result dict with success status and cloud-init completion status
     """
     client = _client()
 
-    # Execute cloud-init status command
-    data = {
-        'command': ['cloud-init', 'status'],
-        'wait-for-websocket': False,
-        'interactive': False,
-        'environment': {},
-        'record-output': True
-    }
+    completed, error = _check_cloudinit_boot_finished(client, name)
 
-    try:
-        result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=data)
-
-        if result.get('error_code') != 0:
-            return {
-                'success': False,
-                'error': f"Failed to execute cloud-init status: {result.get('error', 'Unknown error')}"
-            }
-
-        # Get the operation metadata to extract output
-        metadata = result.get('metadata', {})
-        return_code = metadata.get('return', -1)
-
-        # Parse status from output
-        # cloud-init status returns different statuses: done, running, error, disabled
-        # We need to get the actual output to determine the status
-        output = metadata.get('output', {})
-
-        return {
-            'success': True,
-            'return_code': return_code,
-            'metadata': metadata
-        }
-
-    except Exception as e:
+    if error:
         return {
             'success': False,
-            'error': f'Failed to get cloud-init status: {str(e)}'
+            'error': error
         }
+
+    return {
+        'success': True,
+        'completed': completed,
+        'status': 'done' if completed else 'running'
+    }
 
 
 def instance_wait_cloudinit(name, timeout=600, interval=5):
@@ -4126,58 +4143,43 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
     :return: Result dict with success status and cloud-init result
     """
     client = _client()
+
+    # First, check if cloud-init was already completed before we started waiting
+    completed, error = _check_cloudinit_boot_finished(client, name)
+
+    if completed:
+        log.info(f"cloud-init was already completed on instance '{name}' (boot-finished file exists)")
+        return {
+            'success': True,
+            'status': 'already_completed',
+            'message': f'cloud-init was already completed on {name}',
+            'elapsed_time': 0
+        }
+
+    # cloud-init is not yet complete, start waiting loop
+    log.info(f"Waiting for cloud-init to complete on instance '{name}' (timeout: {timeout}s)")
     started = time.time()
 
-    log.info(f"Waiting for cloud-init to complete on instance '{name}' (timeout: {timeout}s)")
-
     while time.time() - started < timeout:
-        try:
-            # Check for boot-finished marker file - this is the most reliable indicator
-            # that cloud-init has completed (successfully or with errors)
-            check_data = {
-                'command': ['test', '-f', '/var/lib/cloud/instance/boot-finished'],
-                'wait-for-websocket': False,
-                'interactive': False,
-                'environment': {}
+        completed, error = _check_cloudinit_boot_finished(client, name)
+
+        if error:
+            log.debug(f"Error checking cloud-init on '{name}': {error}")
+            time.sleep(interval)
+            continue
+
+        if completed:
+            elapsed = time.time() - started
+            log.info(f"cloud-init completed on '{name}' after {elapsed:.1f}s (boot-finished file exists)")
+            return {
+                'success': True,
+                'status': 'done',
+                'message': f'cloud-init completed on {name}',
+                'elapsed_time': elapsed
             }
 
-            check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
-
-            # DEBUG: Log API response
-            log.debug(f"DEBUG: API error_code={check_result.get('error_code')}, metadata_present={check_result.get('metadata') is not None}")
-
-            if check_result.get('error_code') != 0:
-                log.debug(f"Failed to check cloud-init marker on '{name}': {check_result.get('error')}")
-                time.sleep(interval)
-                continue
-
-            # Get the return code from metadata
-            # Note: Incus API returns nested structure: result['metadata']['metadata']['return']
-            metadata = check_result.get('metadata', {})
-            inner_metadata = metadata.get('metadata', {})
-            return_code = inner_metadata.get('return', -1)
-
-            # DEBUG: Log metadata details
-            log.warning(f"DEBUG: return_code={return_code}, inner_metadata_keys={list(inner_metadata.keys()) if inner_metadata else []}")
-
-            # If boot-finished exists (return code 0), cloud-init has completed
-            if return_code == 0:
-                elapsed = time.time() - started
-                log.info(f"cloud-init completed on '{name}' after {elapsed:.1f}s (boot-finished file exists)")
-                return {
-                    'success': True,
-                    'status': 'done',
-                    'message': f'cloud-init completed on {name}',
-                    'elapsed_time': elapsed
-                }
-
-            # boot-finished doesn't exist yet - still running
-            log.debug(f"cloud-init still running on '{name}' (boot-finished check return_code={return_code}), waiting...")
-
-        except Exception as e:
-            log.debug(f"Exception while checking cloud-init status on '{name}': {str(e)}")
-
-        # Wait before next check
+        # boot-finished doesn't exist yet - still running
+        log.debug(f"cloud-init still running on '{name}', waiting...")
         time.sleep(interval)
 
     # Timeout reached

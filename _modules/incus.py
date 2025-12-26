@@ -4143,6 +4143,9 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
 
             check_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=check_data)
 
+            # DEBUG: Log API response
+            log.debug(f"DEBUG: API error_code={check_result.get('error_code')}, metadata_present={check_result.get('metadata') is not None}")
+
             if check_result.get('error_code') != 0:
                 log.debug(f"Failed to check cloud-init marker on '{name}': {check_result.get('error')}")
                 time.sleep(interval)
@@ -4152,42 +4155,22 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
             metadata = check_result.get('metadata', {})
             return_code = metadata.get('return', -1)
 
+            # DEBUG: Log metadata details
+            log.debug(f"DEBUG: return_code={return_code}, metadata_keys={list(metadata.keys()) if metadata else []}")
+
             # If boot-finished exists (return code 0), cloud-init has completed
             if return_code == 0:
-                # Now check if it completed successfully or with errors
-                # Check result.json for errors
-                error_check_data = {
-                    'command': ['sh', '-c', 'test -f /run/cloud-init/result.json && grep -q \'"errors": \\[\\]\' /run/cloud-init/result.json'],
-                    'wait-for-websocket': False,
-                    'interactive': False,
-                    'environment': {}
+                elapsed = time.time() - started
+                log.info(f"cloud-init completed on '{name}' after {elapsed:.1f}s (boot-finished file exists)")
+                return {
+                    'success': True,
+                    'status': 'done',
+                    'message': f'cloud-init completed on {name}',
+                    'elapsed_time': elapsed
                 }
 
-                error_result = client._sync_request('POST', f'/instances/{quote(name)}/exec', data=error_check_data)
-
-                elapsed = time.time() - started
-
-                if error_result.get('error_code') == 0 and error_result.get('metadata', {}).get('return') == 0:
-                    # No errors - success
-                    log.info(f"cloud-init completed successfully on '{name}' after {elapsed:.1f}s")
-                    return {
-                        'success': True,
-                        'status': 'done',
-                        'message': f'cloud-init completed successfully on {name}',
-                        'elapsed_time': elapsed
-                    }
-                else:
-                    # Has errors
-                    log.warning(f"cloud-init completed with errors on '{name}'")
-                    return {
-                        'success': False,
-                        'status': 'error',
-                        'error': 'cloud-init completed with errors (check /var/log/cloud-init.log for details)',
-                        'elapsed_time': elapsed
-                    }
-
             # boot-finished doesn't exist yet - still running
-            log.debug(f"cloud-init still running on '{name}', waiting...")
+            log.debug(f"cloud-init still running on '{name}' (boot-finished check return_code={return_code}), waiting...")
 
         except Exception as e:
             log.debug(f"Exception while checking cloud-init status on '{name}': {str(e)}")

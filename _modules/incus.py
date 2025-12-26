@@ -4152,11 +4152,13 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
                 continue
 
             # Get the return code from metadata
+            # Note: Incus API returns nested structure: result['metadata']['metadata']['return']
             metadata = check_result.get('metadata', {})
-            return_code = metadata.get('return', -1)
+            inner_metadata = metadata.get('metadata', {})
+            return_code = inner_metadata.get('return', -1)
 
             # DEBUG: Log metadata details
-            log.debug(f"DEBUG: return_code={return_code}, metadata_keys={list(metadata.keys()) if metadata else []}")
+            log.warning(f"DEBUG: return_code={return_code}, inner_metadata_keys={list(inner_metadata.keys()) if inner_metadata else []}")
 
             # If boot-finished exists (return code 0), cloud-init has completed
             if return_code == 0:

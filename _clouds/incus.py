@@ -794,6 +794,65 @@ def create(vm_):
             f"Cannot create instance '{name}': 'image' is required in the profile"
         )
 
+    # --- type ---
+    # Accept both 'type' (spec) and legacy 'instance_type'
+    raw_type = vm_.get("type") or vm_.get("instance_type", "container")
+    _type_map = {
+        "container": "container",
+        "vm": "virtual-machine",
+        "virtual-machine": "virtual-machine",
+    }
+    if raw_type not in _type_map:
+        raise SaltCloudException(
+            f"Cannot create instance '{name}': unknown type '{raw_type}'. "
+            "Must be 'container', 'vm', or 'virtual-machine'."
+        )
+    instance_type = _type_map[raw_type]
+
+    # --- target / cluster placement ---
+    # Accept both 'target' (spec) and legacy 'location'
+    target = vm_.get("target") or vm_.get("location") or ""
+
+    profiles = vm_.get("profiles", ["default"])
+
+    # --- payload builder: high-level params → config / devices ---
+    # Start from raw passthrough values; high-level params take precedence
+    raw_config = dict(vm_.get("config") or {})
+    raw_devices = dict(vm_.get("devices") or {})
+
+    generated_config = {}
+    generated_devices = {}
+
+    cpu = vm_.get("cpu")
+    if cpu is not None:
+        generated_config["limits.cpu"] = str(cpu)
+
+    memory = vm_.get("memory")
+    if memory is not None:
+        generated_config["limits.memory"] = str(memory)
+
+    cloud_init = vm_.get("cloud_init")
+    if cloud_init is not None:
+        generated_config["user.user-data"] = cloud_init
+
+    disk_size = vm_.get("disk_size")
+    storage_pool = vm_.get("storage_pool")
+    if disk_size or storage_pool:
+        root_dev = {"type": "disk", "path": "/"}
+        if storage_pool:
+            root_dev["pool"] = storage_pool
+        if disk_size:
+            root_dev["size"] = str(disk_size)
+        generated_devices["root"] = root_dev
+
+    network = vm_.get("network")
+    if network:
+        generated_devices["eth0"] = {"type": "nic", "network": network}
+
+    # High-level generated values override raw passthrough (per spec Section 10)
+    final_config = deep_merge(raw_config, generated_config)
+    final_devices = deep_merge(raw_devices, generated_devices)
+
     salt.utils.cloud.fire_event(
         "event",
         "starting create",
@@ -805,15 +864,9 @@ def create(vm_):
         transport=__opts__["transport"],
     )
 
-    log.info("Creating Incus instance '%s' from image alias '%s'", name, image_alias)
+    log.info("Creating Incus instance '%s' (type=%s) from image '%s'", name, instance_type, image_alias)
 
     client = _client()
-
-    instance_type = vm_.get("instance_type", "container")
-    profiles = vm_.get("profiles", ["default"])
-    cfg = vm_.get("config") or {}
-    devices = vm_.get("devices") or {}
-    location = vm_.get("location") or ""
 
     # Build POST body
     data = {
@@ -826,14 +879,14 @@ def create(vm_):
         "profiles": profiles,
     }
 
-    if cfg:
-        data["config"] = cfg
+    if final_config:
+        data["config"] = final_config
 
-    if devices:
-        data["devices"] = devices
+    if final_devices:
+        data["devices"] = final_devices
 
-    if location:
-        data["location"] = location
+    if target:
+        data["target"] = target
 
     salt.utils.cloud.fire_event(
         "event",
@@ -870,18 +923,33 @@ def create(vm_):
             f"Failed to start Incus instance '{name}': {error_msg}"
         )
 
-    log.info("Waiting for Incus instance '%s' to be running and have an IP", name)
+    # --- wait parameters (spec Section 9 names, with fallback to legacy names) ---
+    # Use explicit None-check to allow 0 as a valid value for timeout/interval.
+    do_wait_for_ip = vm_.get("wait_for_ip", True)
+    _timeout = vm_.get("wait_timeout") if vm_.get("wait_timeout") is not None else vm_.get("wait_for_ip_timeout", 60)
+    wait_timeout = int(_timeout if _timeout is not None else 60)
+    _interval = vm_.get("wait_interval") if vm_.get("wait_interval") is not None else vm_.get("wait_for_ip_interval", 2)
+    wait_interval = int(_interval if _interval is not None else 2)
+    wait_for_agent = vm_.get("wait_for_agent", False)
+    fail_on_wait_timeout = vm_.get("fail_on_wait_timeout", False)
 
-    # Wait for instance to be running and have an IP address
-    timeout = vm_.get("wait_for_ip_timeout", 120)
-    interval = vm_.get("wait_for_ip_interval", 2)
-    private_ips = _wait_for_ip(client, name, timeout=timeout, interval=interval)
+    private_ips = []
 
-    if not private_ips:
-        log.warning(
-            "Instance '%s' is running but no IP address was obtained within %ds",
-            name, timeout,
-        )
+    if do_wait_for_ip:
+        log.info("Waiting for Incus instance '%s' to obtain an IP (timeout=%ds)", name, wait_timeout)
+        private_ips = _wait_for_ip(client, name, timeout=wait_timeout, interval=wait_interval)
+
+        if not private_ips:
+            msg = f"Instance '{name}' did not obtain an IP within {wait_timeout}s"
+            if fail_on_wait_timeout:
+                raise SaltCloudException(msg)
+            log.warning(msg)
+
+    if wait_for_agent:
+        log.info("Waiting for Incus agent on instance '%s'", name)
+        # Poll /instances/{name}/state until agent is ready (status Running + network up)
+        # incus.instance_wait_ready is in execution module, but we call API directly here
+        _wait_for_ip(client, name, timeout=wait_timeout, interval=wait_interval)
 
     node = {
         "id": name,
@@ -1025,3 +1093,154 @@ def destroy(name, call=None):
     )
 
     return {name: {"destroyed": True}}
+
+
+def show_instance(name, call=None):
+    """
+    Show details of a specific Incus instance.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a show_instance my-instance
+
+    :param name: Instance name
+    :param call: Call type (must be "action")
+    :return: Node info dict
+    """
+    if call != "action":
+        raise SaltCloudSystemExit(
+            "The show_instance action must be called with -a or --action."
+        )
+
+    client = _client()
+    result = client._request("GET", f"/instances/{quote(name)}")
+
+    if result.get("error_code") not in (None, 0):
+        raise SaltCloudNotFound(f"Instance '{name}' not found")
+
+    instance = result.get("metadata", {}) or {}
+    state_result = client._request("GET", f"/instances/{quote(name)}/state")
+    network_state = {}
+    if state_result.get("error_code") in (None, 0):
+        meta = state_result.get("metadata", {}) or {}
+        network_state = meta.get("network", {}) or {}
+
+    profiles = instance.get("profiles", []) or []
+    expanded = instance.get("expanded_config", {}) or {}
+    image_label = expanded.get("image.description") or expanded.get("image.os", "")
+
+    return {
+        "id": name,
+        "image": image_label,
+        "size": profiles[0] if profiles else "",
+        "state": instance.get("status", "").lower(),
+        "private_ips": _extract_ips(network_state),
+        "public_ips": [],
+    }
+
+
+def start(name, call=None):
+    """
+    Start an Incus instance.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a start my-instance
+
+    :param name: Instance name
+    :param call: Call type (must be "action")
+    :return: Dict with result
+    """
+    if call != "action":
+        raise SaltCloudSystemExit(
+            "The start action must be called with -a or --action."
+        )
+
+    client = _client()
+
+    result = client._sync_request(
+        "PUT",
+        f"/instances/{quote(name)}/state",
+        data={"action": "start", "force": False},
+    )
+
+    if result.get("error_code") not in (None, 0):
+        raise SaltCloudException(
+            f"Failed to start Incus instance '{name}': {result.get('error', 'Unknown error')}"
+        )
+
+    return {name: {"started": True}}
+
+
+def stop(name, call=None):
+    """
+    Stop an Incus instance.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a stop my-instance
+
+    :param name: Instance name
+    :param call: Call type (must be "action")
+    :return: Dict with result
+    """
+    if call != "action":
+        raise SaltCloudSystemExit(
+            "The stop action must be called with -a or --action."
+        )
+
+    client = _client()
+
+    result = client._sync_request(
+        "PUT",
+        f"/instances/{quote(name)}/state",
+        data={"action": "stop", "force": False, "timeout": 30},
+    )
+
+    if result.get("error_code") not in (None, 0):
+        raise SaltCloudException(
+            f"Failed to stop Incus instance '{name}': {result.get('error', 'Unknown error')}"
+        )
+
+    return {name: {"stopped": True}}
+
+
+def reboot(name, call=None):
+    """
+    Reboot an Incus instance.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a reboot my-instance
+
+    :param name: Instance name
+    :param call: Call type (must be "action")
+    :return: Dict with result
+    """
+    if call != "action":
+        raise SaltCloudSystemExit(
+            "The reboot action must be called with -a or --action."
+        )
+
+    client = _client()
+
+    result = client._sync_request(
+        "PUT",
+        f"/instances/{quote(name)}/state",
+        data={"action": "restart", "force": False, "timeout": 30},
+    )
+
+    if result.get("error_code") not in (None, 0):
+        raise SaltCloudException(
+            f"Failed to reboot Incus instance '{name}': {result.get('error', 'Unknown error')}"
+        )
+
+    return {name: {"rebooted": True}}

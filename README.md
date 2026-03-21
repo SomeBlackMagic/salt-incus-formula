@@ -345,6 +345,12 @@ Detailed documentation for each component is located in the `docs/` directory:
   - Cluster settings
   - Performance tuning
 
+- **[tls-api-client.md](docs/tls-api-client.md)** - API client TLS / PKI workflow
+  - Manual keypair generation via `salt-call`
+  - Trust import into Incus
+  - local_files and SDB storage examples
+  - Idempotency and `test=True` behavior
+
 - **[instance_snapshots.md](docs/instance_snapshots.md)** - Snapshots and backups
   - Creating snapshots
   - Restoration

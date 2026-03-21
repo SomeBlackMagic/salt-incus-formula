@@ -31,6 +31,19 @@ default:
     type: 'unix'
     socket: /var/lib/incus/unix.socket
 
+  api_client:
+    enabled: false
+    storage:
+      type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    generate:
+      cn: salt-cloud
+      days: 3650
+    trust_import: false
+    trust_name: salt-cloud
+    trust_restricted: false
+
   global:
     lxcfs:
       enable: false

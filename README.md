@@ -242,6 +242,16 @@ All examples are located in the `pillars.example/` directory:
   - Trust password
   - Routing
 
+- **`tls.sls`** - API client TLS examples (local_files)
+  - Manual keypair generation
+  - Trust import flow
+  - HTTPS connection mapping
+
+- **`tls-sdb.sls`** - API client TLS examples (SDB)
+  - SDB-backed cert/key storage
+  - Trust import from SDB
+  - HTTPS cert_storage from SDB
+
 
 ### Quick Examples
 
@@ -345,11 +355,23 @@ Detailed documentation for each component is located in the `docs/` directory:
   - Cluster settings
   - Performance tuning
 
+- **[tls-api-client.md](docs/tls-api-client.md)** - API client TLS / PKI workflow
+  - Manual keypair generation via `salt-call`
+  - Trust import into Incus
+  - local_files and SDB storage examples
+  - Idempotency and `test=True` behavior
+
 - **[instance_snapshots.md](docs/instance_snapshots.md)** - Snapshots and backups
   - Creating snapshots
   - Restoration
   - Expiry policies
   - Automation
+
+- **`docs/examples/salt-cloud/`** - Ready-to-use `salt-cloud` configs
+  - `cloud.providers.local-files.conf`
+  - `cloud.profiles.local-files.conf`
+  - `cloud.providers.sdb.conf`
+  - `cloud.profiles.sdb.conf`
 
 ### Core Concepts
 

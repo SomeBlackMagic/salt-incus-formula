@@ -64,6 +64,13 @@ Alternatively, place `_clouds/incus.py` directly in Salt's extension module path
 
 Create a provider file at `/etc/salt/cloud.providers.d/incus.conf`.
 
+Ready-to-use example files are available in:
+
+- `docs/examples/salt-cloud/cloud.providers.local-files.conf`
+- `docs/examples/salt-cloud/cloud.profiles.local-files.conf`
+- `docs/examples/salt-cloud/cloud.providers.sdb.conf`
+- `docs/examples/salt-cloud/cloud.profiles.sdb.conf`
+
 ### Unix Socket (local)
 
 Connect to an Incus daemon running on the same host as the Salt master — the simplest

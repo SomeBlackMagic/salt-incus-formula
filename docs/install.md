@@ -2,277 +2,57 @@
 
 ## Description
 
-State `incus.install` manages the installation of the Incus package and its dependencies at the operating system level.
+State `incus.install` manages installation and basic initialization of Incus.
 
 ## Functionality
 
 ### Main Features
 
 1. **Zabbly Repository Setup** (if `incus.repo.enable: true`):
-   - Creating directory for APT keys `/etc/apt/keyrings`
-   - Downloading a repository GPG key
-   - Creating a source file for a repository in DEB822 format
+   - Creates `/etc/apt/keyrings`
+   - Downloads repository key
+   - Creates DEB822 source file for APT (Debian/Ubuntu)
+   - Configures yum/dnf repository (RedHat family)
 
 2. **Incus Package Installation**:
-   - Support for installing a specific version (optional)
-   - Automatic package index update before installation
+   - Installs package from configured repositories
+   - Supports optional pinned version (`incus.version`)
 
-3. **Dependencies Installation**:
-   - Installing additional packages required for Incus operation
-   - Configured via pillar `incus.pkg.deps`
+3. **Incus Service Management**:
+   - Ensures service is enabled and running
+   - Runs `incus admin init --minimal` once on fresh setup
 
-4. **System Trust Store Import** (optional):
-   - Imports a CA certificate into OS trusted certificates
-   - Certificate source can be `sdb://...`, inline `contents`, or `source`
-   - Runs trust-store refresh command after certificate updates
+4. **Additional Dependencies**:
+   - Installs packages from `incus.pkg.deps`
 
-## File Structure
-
-### states/incus/install.sls
-
-```
-states/incus/install.sls:8-11  - Variable definitions (codename, arch, channel, version)
-states/incus/install.sls:13    - Check installation enable flag
-states/incus/install.sls:14-46 - Repository setup (optional)
-states/incus/install.sls:49-60 - Install incus package
-states/incus/install.sls:63-67 - Install additional dependencies
-```
-
-### Repository Parameters
-
-```yaml
-incus:
-  repo:
-    enable: true              # Enable repository setup
-    channel: stable           # Repository channel: stable, edge
-    debian:
-      architecture: amd64     # Architecture: amd64, arm64
-      key_url: https://pkgs.zabbly.com/key.asc  # GPG key URL
-```
-
-### Package Parameters
-
-```yaml
-incus:
-  version: "6.0.1"           # Package version (optional)
-  pkg:
-    deps:                     # Dependencies list
-      - qemu-kvm
-      - lxcfs
-```
-
-### Trust Store Parameters (optional)
-
-```yaml
-incus:
-  trust_store:
-    enable: true
-    # Choose one:
-    sdb: sdb://vault/incus/ca
-    # source: salt://incus/files/incus-remote-ca.crt
-    # contents: |
-    #   -----BEGIN CERTIFICATE-----
-    #   ...
-    #   -----END CERTIFICATE-----
-    #
-    # Optional overrides:
-    # target: /usr/local/share/ca-certificates/incus-remote.crt
-    # update_cmd: update-ca-certificates
-```
-
-### API Client Trust Parameters (optional)
-
-```yaml
-incus:
-  api_client_trust:
-    enable: true
-    ensure: present            # present | absent
-    name: salt-cloud
-    cert_path: /etc/salt/pki/incus/client.crt
-
-    # Source priority (top to bottom):
-    # cert_sdb: sdb://vault/incus/client_cert
-    # cert_contents: |
-    #   -----BEGIN CERTIFICATE-----
-    #   ...
-    #   -----END CERTIFICATE-----
-    # cert_source: salt://incus/files/client.crt
-    cert_sdb: null
-    cert_contents: null
-    cert_source: null
-```
-
-Notes:
-- `api_client_trust` works only when `incus.enable: true`.
-- `cert_sdb` has highest priority; if it is set but resolves to empty value, state fails.
-- `ensure: absent` with missing `cert_path` logs a warning and performs no changes.
-- If trust entry with the same `name` already exists but has different fingerprint, state fails.
-
-## Generated Resources
-
-### With Enabled Repository
-
-1. **Directory**: `/etc/apt/keyrings` (mode 0755)
-2. **Key File**: `/etc/apt/keyrings/zabbly.asc` (mode 0644)
-3. **Sources File**: `/etc/apt/sources.list.d/zabbly-incus-{channel}.sources`
-
-Example sources file content:
-```
-Enabled: yes
-Types: deb
-URIs: https://pkgs.zabbly.com/incus/stable
-Suites: bookworm
-Components: main
-Architectures: amd64
-Signed-By: /etc/apt/keyrings/zabbly.asc
-```
-
-### Installed Packages
-
-- `incus` - main package
-- Additional packages from `incus.pkg.deps` list
-- `ca-certificates` - installed when `incus.trust_store.enable: true`
-
-## Usage Examples
-
-### Minimal Configuration
-
-Installing Incus from system standard repositories:
+## Key Parameters
 
 ```yaml
 incus:
   enable: true
-  repo:
-    enable: false
-  pkg:
-    deps:
-      - lxcfs
-```
 
-### Full Configuration with Zabbly Repository
-
-```yaml
-incus:
-  enable: true
-  version: "6.0.1"
   repo:
     enable: true
     channel: stable
     debian:
       architecture: amd64
       key_url: https://pkgs.zabbly.com/key.asc
+
   pkg:
+    name: incus
     deps:
       - qemu-kvm
       - lxcfs
-      - zfsutils-linux
-```
 
-### Installing Edge Version
-
-```yaml
-incus:
-  enable: true
-  repo:
+  service:
+    name: incus
     enable: true
-    channel: edge
-    debian:
-      architecture: amd64
-      key_url: https://pkgs.zabbly.com/key.asc
-  pkg:
-    deps:
-      - qemu-kvm
-      - lxcfs
 ```
-
-### Import CA Certificate from SDB
-
-```yaml
-incus:
-  enable: true
-  trust_store:
-    enable: true
-    sdb: sdb://vault/incus/ca
-```
-
-### Manage Incus API Client Trust
-
-```yaml
-incus:
-  enable: true
-  client_cert:
-    enable: true
-    cert_path: /etc/salt/pki/incus/client.crt
-    key_path: /etc/salt/pki/incus/client.key
-
-  api_client_trust:
-    enable: true
-    ensure: present
-    name: salt-cloud
-    cert_path: /etc/salt/pki/incus/client.crt
-```
-
-## Dependencies
-
-### Grains
-
-- `oscodename` - used to determine distribution codename (default: bookworm)
-
-### External Files
-
-- `incus/map.jinja` - load configuration from pillar and defaults
-- `incus/defaults.yaml` - default values
 
 ## Execution Order
 
-1. Create a directory for keys (if the repository is enabled)
-2. Download the GPG key (if the repository is enabled)
-3. Create a repository sources file (if the repository is enabled)
-4. Update package index and install Incus
-5. Import/update trusted CA certificate (optional)
-6. Manage API client certificate trust list (optional)
-7. Install additional dependencies
-
-## Features
-
-- **DEB822 Format**: Repository is configured in modern `.sources` format instead of old `.list` format
-- **Index Update**: Parameter `refresh: True` is specified twice in `incus-package` (possibly redundant)
-- **Signature Verification**: `skip_verify: True` disables SSL verification when downloading key
-- **Channel Flexibility**: Support for different repository channels (stable, edge)
-
-## Installation Verification
-
-After applying state, verify installation:
-
-```bash
-# Check Incus version
-incus --version
-
-# Check repository (if enabled)
-cat /etc/apt/sources.list.d/zabbly-incus-stable.sources
-
-# Check installed packages
-dpkg -l | grep incus
-dpkg -l | grep -E 'qemu-kvm|lxcfs'
-```
-
-## Possible Issues
-
-### Repository Unavailable
-
-If `incus.repo.enable: true`, but Zabbly repository is unavailable:
-- Set `incus.repo.enable: false`
-- Ensure package is available in system standard repositories
-
-### Version Conflict
-
-When specifying a specific version via `incus.version`:
-- Ensure a version is available in a selected repository channel
-- Check available versions: `apt-cache madison incus`
-
-### Missing Dependencies
-
-Some dependencies may be missing in your distribution:
-- Adapt `incus.pkg.deps` list for your system
-- Virtual machines require `qemu-kvm`
-- ZFS requires `zfsutils-linux`
+1. Configure repository (optional)
+2. Install `incus`
+3. Start/enable service
+4. Run one-time minimal init
+5. Install additional dependencies

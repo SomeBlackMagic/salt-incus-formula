@@ -17,33 +17,6 @@
   {% set incus_version = incus.get("version", None) %}
   {% set pkg_name = pkg.get("name", "incus") %}
   {% set db_file = '/var/lib/incus/database/local.db' %}
-  {% set trust_store = incus.get("trust_store") | default({}, true) %}
-  {% set trust_enable = trust_store.get("enable", false) %}
-  {% set trust_sdb = trust_store.get("sdb") %}
-  {% set trust_source = trust_store.get("source") %}
-  {% set trust_contents = trust_store.get("contents") %}
-  {% set trust_target = trust_store.get("target") %}
-  {% set trust_update_cmd = trust_store.get("update_cmd") %}
-
-  {% if trust_sdb %}
-    {% set trust_contents = salt['sdb.get'](trust_sdb) %}
-  {% endif %}
-
-  {% if not trust_target %}
-    {% if os_family == "RedHat" %}
-      {% set trust_target = "/etc/pki/ca-trust/source/anchors/incus-remote.crt" %}
-    {% else %}
-      {% set trust_target = "/usr/local/share/ca-certificates/incus-remote.crt" %}
-    {% endif %}
-  {% endif %}
-
-  {% if not trust_update_cmd %}
-    {% if os_family == "RedHat" %}
-      {% set trust_update_cmd = "update-ca-trust extract" %}
-    {% else %}
-      {% set trust_update_cmd = "update-ca-certificates" %}
-    {% endif %}
-  {% endif %}
 
   {#- Debian/Ubuntu repository setup -#}
   {% if repo.get("enable") and os_family == "Debian" %}
@@ -138,55 +111,6 @@ incus-init:
     - unless: test -f {{ db_file }}
     - require:
       - service: incus-service
-
-  {% if trust_enable %}
-incus-ca-certificates:
-  pkg.installed:
-    - name: ca-certificates
-    - require:
-      - pkg: incus-package
-
-  {% if trust_contents %}
-incus-trust-certificate:
-  file.managed:
-    - name: {{ trust_target }}
-    - user: root
-    - group: root
-    - mode: '0644'
-    - makedirs: True
-    - contents: |
-{{ trust_contents | indent(8, true) }}
-    - require:
-      - pkg: incus-ca-certificates
-  {% elif trust_source %}
-incus-trust-certificate:
-  file.managed:
-    - name: {{ trust_target }}
-    - source: {{ trust_source | tojson }}
-    - user: root
-    - group: root
-    - mode: '0644'
-    - makedirs: True
-    - require:
-      - pkg: incus-ca-certificates
-  {% else %}
-incus-trust-certificate-config-error:
-  test.fail_without_changes:
-    - name: >-
-        incus.trust_store.enable=true, but no certificate provided.
-        Set one of: incus.trust_store.sdb, incus.trust_store.contents, incus.trust_store.source.
-  {% endif %}
-
-  {% if trust_contents or trust_source %}
-incus-trust-store-update:
-  cmd.run:
-    - name: {{ trust_update_cmd | tojson }}
-    - onchanges:
-      - file: incus-trust-certificate
-    - require:
-      - file: incus-trust-certificate
-  {% endif %}
-  {% endif %}
 
   {#- Install dependencies -#}
   {% if pkg.get("deps") %}

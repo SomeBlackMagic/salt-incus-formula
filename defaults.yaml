@@ -30,36 +30,6 @@ default:
   connection:
     type: 'unix'
     socket: /var/lib/incus/unix.socket
-    cert_storage:
-      # local_files | sdb
-      type: local_files
-      # local_files: path to certificate/key files
-      # sdb: sdb:// URI for certificate/key values
-      cert: null
-      key: null
-      # local_files: true|false|/path/to/ca.crt
-      # sdb: sdb:// URI returning true|false|/path|PEM
-      verify: true
-
-  # Client TLS certificate pair generation (for remote HTTPS API access)
-  client_cert:
-    enable: false
-    cert_path: /etc/salt/pki/incus/client.crt
-    key_path: /etc/salt/pki/incus/client.key
-    cn: salt-incus-client
-    days: 3650
-    curve: P-384
-
-  # Manage client certificate trust in Incus API trust list.
-  api_client_trust:
-    enable: false
-    ensure: present # present|absent
-    name: salt-cloud
-    cert_path: /etc/salt/pki/incus/client.crt
-    # Certificate source priority: cert_sdb -> cert_contents -> cert_source -> cert_path
-    cert_sdb: null
-    cert_contents: null
-    cert_source: null
 
   global:
     lxcfs:
@@ -76,21 +46,6 @@ default:
     # Name of the systemd service providing Incus daemon.
     name: incus
     enable: true
-
-  trust_store:
-    enable: false
-    # SDB URI with CA cert content, for example: sdb://vault/incus/ca
-    sdb: null
-    # Alternative: inline certificate content (PEM)
-    contents: null
-    # Alternative: source file path for file.managed (salt://, http(s)://, etc.)
-    source: null
-    # Optional override for destination certificate path
-    target: null
-    # Optional command override. Defaults:
-    # Debian/Ubuntu: update-ca-certificates
-    # RedHat: update-ca-trust extract
-    update_cmd: null
 
   images: {}
     # Example structure (override in pillar):

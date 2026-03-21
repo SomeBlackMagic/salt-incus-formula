@@ -1,7 +1,17 @@
 apiVersion: v1
-generated: 2026-03-17 13:01:17.227266
+generated: 2026-03-21 11:45:19.785491
 packages:
   incus:
+  - version: 0.5.0
+    url: https://github.com/SomeBlackMagic/salt-incus-formula/releases/download/incus-0.5.0/incus-0.5.0.tgz
+    digest: sha256:d8839f1dbcbd32c1a5d5f59ab35bac3215906e1390e92cdf2a92d7671911a600
+    created: 2026-03-21 11:45:19.785449
+    keywords: []
+    maintainers:
+    - name: Developer
+      email: dev@example.com
+    sources: []
+    dependencies: []
   - version: 0.4.0
     url: https://github.com/SomeBlackMagic/salt-incus-formula/releases/download/incus-0.4.0/incus-0.4.0.tgz
     digest: sha256:ed0a17c0ab3528c1d2c3eb163946666ebb25d5cffdb8a43621c7be81759d8c38

@@ -14,6 +14,8 @@ All state functions support test=True mode for dry-run.
 """
 
 import logging
+import os
+import shlex
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +108,73 @@ def _normalize_config_value(value):
     if isinstance(value, bool):
         return str(value).lower()
     return str(value)
+
+
+def _normalize_fingerprint(value):
+    """
+    Normalize fingerprint for stable comparisons.
+    """
+    if value is None:
+        return ""
+    return str(value).replace(":", "").strip().lower()
+
+
+def _validate_pem_certificate(cert_path):
+    """
+    Validate that cert_path points to a valid PEM X509 certificate.
+    """
+    cmd = f"openssl x509 -in {shlex.quote(cert_path)} -noout"
+    result = __salt__["cmd.run_all"](cmd, python_shell=True)
+    if result.get("retcode", 1) != 0:
+        stderr = (result.get("stderr") or "").strip()
+        stdout = (result.get("stdout") or "").strip()
+        error_text = stderr or stdout or "openssl validation failed"
+        return {
+            "success": False,
+            "error": f"Invalid PEM certificate at {cert_path}: {error_text}",
+        }
+    return {"success": True}
+
+
+def _get_certificate_fingerprint(cert_path):
+    """
+    Read SHA256 fingerprint of PEM X509 certificate using openssl.
+    """
+    cmd = (
+        f"openssl x509 -in {shlex.quote(cert_path)} "
+        "-noout -fingerprint -sha256"
+    )
+    result = __salt__["cmd.run_all"](cmd, python_shell=True)
+    if result.get("retcode", 1) != 0:
+        stderr = (result.get("stderr") or "").strip()
+        stdout = (result.get("stdout") or "").strip()
+        error_text = stderr or stdout or "openssl fingerprint extraction failed"
+        return {
+            "success": False,
+            "error": f"Failed to get certificate fingerprint: {error_text}",
+        }
+
+    output = (result.get("stdout") or "").strip()
+    if "=" not in output:
+        return {
+            "success": False,
+            "error": (
+                "Failed to parse certificate fingerprint output from openssl: "
+                f"{output}"
+            ),
+        }
+
+    fingerprint = _normalize_fingerprint(output.split("=", 1)[1])
+    if not fingerprint:
+        return {
+            "success": False,
+            "error": "Certificate fingerprint is empty",
+        }
+
+    return {
+        "success": True,
+        "fingerprint": fingerprint,
+    }
 
 
 # ======================================================================
@@ -3845,6 +3914,195 @@ def cluster_member_absent(name, force=False):
             f"{remove_result.get('error')}"
         )
 
+    return ret
+
+
+# ======================================================================
+# Certificate Trust States
+# ======================================================================
+
+def client_certificate_trusted(name, cert_path, ensure="present"):
+    """
+    Ensure client certificate trust entry exists (or is absent) in Incus.
+
+    :param name: Trust entry name in Incus
+    :param cert_path: Path to PEM certificate file
+    :param ensure: present|absent
+
+    Behavior:
+    - ensure=present:
+      - fail if cert file missing/invalid
+      - fail if same name already exists with different fingerprint
+      - add trust entry only when fingerprint is not already trusted
+    - ensure=absent:
+      - if cert file missing, warn and do nothing
+      - if fingerprint exists, remove it; otherwise no-op
+    """
+    ret = {
+        "name": name,
+        "result": True,
+        "changes": {},
+        "comment": "",
+    }
+
+    if ensure not in ("present", "absent"):
+        ret["result"] = False
+        ret["comment"] = f"Invalid ensure value: {ensure}. Expected present|absent."
+        return ret
+
+    if not cert_path or not isinstance(cert_path, str):
+        ret["result"] = False
+        ret["comment"] = "cert_path must be a non-empty string"
+        return ret
+
+    cert_missing = (not os.path.exists(cert_path)) or os.path.getsize(cert_path) == 0
+    if cert_missing:
+        message = (
+            f"Certificate file is missing or empty at {cert_path}. "
+            "Skipping trust removal."
+        )
+        if ensure == "absent":
+            ret["warnings"] = [message]
+            ret["comment"] = message
+            return ret
+
+        ret["result"] = False
+        ret["comment"] = (
+            "incus.api_client_trust.enable=true requires certificate file at "
+            f"{cert_path}"
+        )
+        return ret
+
+    pem_check = _validate_pem_certificate(cert_path)
+    if not pem_check.get("success"):
+        ret["result"] = False
+        ret["comment"] = pem_check.get("error")
+        return ret
+
+    fingerprint_result = _get_certificate_fingerprint(cert_path)
+    if not fingerprint_result.get("success"):
+        ret["result"] = False
+        ret["comment"] = fingerprint_result.get("error")
+        return ret
+
+    target_fingerprint = fingerprint_result.get("fingerprint")
+
+    list_result = __salt__["incus.certificate_list"](recursion=1)
+    if not list_result.get("success"):
+        ret["result"] = False
+        ret["comment"] = (
+            "Failed to list trusted certificates: "
+            f"{list_result.get('error')}"
+        )
+        return ret
+
+    certificates = list_result.get("certificates", []) or []
+    cert_by_fingerprint = None
+    conflict_by_name = None
+
+    for cert in certificates:
+        cert_fingerprint = _normalize_fingerprint(cert.get("fingerprint"))
+        cert_name = cert.get("name")
+
+        if cert_fingerprint == target_fingerprint:
+            cert_by_fingerprint = cert
+
+        if cert_name == name and cert_fingerprint != target_fingerprint:
+            conflict_by_name = cert
+
+    if ensure == "present":
+        if conflict_by_name:
+            ret["result"] = False
+            ret["comment"] = (
+                f"Certificate name conflict for '{name}': "
+                f"existing fingerprint {conflict_by_name.get('fingerprint')} "
+                f"differs from {target_fingerprint}."
+            )
+            return ret
+
+        if cert_by_fingerprint:
+            ret["comment"] = (
+                f"Certificate {name} already trusted "
+                f"({cert_by_fingerprint.get('fingerprint')})"
+            )
+            return ret
+
+        if __opts__.get("test"):
+            ret["result"] = None
+            ret["comment"] = f"Certificate {name} would be added to trust store"
+            ret["changes"] = {
+                "certificate": {
+                    "old": None,
+                    "new": {
+                        "name": name,
+                        "fingerprint": target_fingerprint,
+                    },
+                }
+            }
+            return ret
+
+        add_result = __salt__["incus.certificate_add"](cert_path, name=name)
+        if not add_result.get("success"):
+            ret["result"] = False
+            ret["comment"] = (
+                f"Failed to add certificate {name} to trust store: "
+                f"{add_result.get('error')}"
+            )
+            return ret
+
+        ret["comment"] = f"Certificate {name} added to trust store"
+        ret["changes"] = {
+            "certificate": {
+                "old": None,
+                "new": {
+                    "name": name,
+                    "fingerprint": target_fingerprint,
+                },
+            }
+        }
+        return ret
+
+    # ensure == absent
+    if not cert_by_fingerprint:
+        ret["comment"] = (
+            f"Certificate {name} already absent in trust store "
+            f"({target_fingerprint})"
+        )
+        return ret
+
+    if __opts__.get("test"):
+        ret["result"] = None
+        ret["comment"] = f"Certificate {name} would be removed from trust store"
+        ret["changes"] = {
+            "certificate": {
+                "old": {
+                    "name": cert_by_fingerprint.get("name"),
+                    "fingerprint": cert_by_fingerprint.get("fingerprint"),
+                },
+                "new": None,
+            }
+        }
+        return ret
+
+    remove_result = __salt__["incus.certificate_remove"](target_fingerprint)
+    if not remove_result.get("success"):
+        ret["result"] = False
+        ret["comment"] = (
+            f"Failed to remove certificate {name} from trust store: "
+            f"{remove_result.get('error')}"
+        )
+        return ret
+
+    ret["comment"] = f"Certificate {name} removed from trust store"
+    ret["changes"] = {
+        "certificate": {
+            "old": {
+                "name": cert_by_fingerprint.get("name"),
+                "fingerprint": cert_by_fingerprint.get("fingerprint"),
+            },
+            "new": None,
+        }
+    }
     return ret
 
 

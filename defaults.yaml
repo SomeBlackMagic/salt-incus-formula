@@ -50,6 +50,17 @@ default:
     days: 3650
     curve: P-384
 
+  # Manage client certificate trust in Incus API trust list.
+  api_client_trust:
+    enable: false
+    ensure: present # present|absent
+    name: salt-cloud
+    cert_path: /etc/salt/pki/incus/client.crt
+    # Certificate source priority: cert_sdb -> cert_contents -> cert_source -> cert_path
+    cert_sdb: null
+    cert_contents: null
+    cert_source: null
+
   global:
     lxcfs:
       enable: false

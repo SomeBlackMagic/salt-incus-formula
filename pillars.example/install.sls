@@ -94,6 +94,23 @@ incus:
     days: 3650
     curve: P-384
 
+  # Optional: trust client certificate in Incus API trust store
+  api_client_trust:
+    enable: false
+    ensure: present # present | absent
+    name: salt-cloud
+    cert_path: /etc/salt/pki/incus/client.crt
+    # Source priority:
+    # cert_sdb: sdb://vault/incus/client_cert
+    # cert_contents: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    #   -----END CERTIFICATE-----
+    # cert_source: salt://incus/files/client.crt
+    cert_sdb: null
+    cert_contents: null
+    cert_source: null
+
 # ============================================================================
 # Configuration examples
 # ============================================================================

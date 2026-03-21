@@ -9,6 +9,7 @@ provision, manage, and destroy Incus containers and virtual machines using the s
 
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [End-to-End TLS Bootstrap](#end-to-end-tls-bootstrap)
 - [Provider Configuration](#provider-configuration)
   - [Unix Socket (local)](#unix-socket-local)
   - [HTTPS (remote)](#https-remote)
@@ -60,6 +61,18 @@ Alternatively, place `_clouds/incus.py` directly in Salt's extension module path
 
 ---
 
+## End-to-End TLS Bootstrap
+
+1. Generate or provision a client certificate/key pair.
+2. Apply `incus.trust` so the certificate is added into Incus trust list.
+3. Run `salt-cloud` after trust state succeeds.
+
+```bash
+salt-call --local state.apply incus.trust
+```
+
+---
+
 ## Provider Configuration
 
 Create a provider file at `/etc/salt/cloud.providers.d/incus.conf`.
@@ -99,7 +112,7 @@ my-incus-remote:
       verify: true                        # verify server certificate (recommended)
 ```
 
-Generate a client certificate accepted by Incus:
+Generate a client certificate and trust it in Incus:
 
 ```bash
 # Generate client certificate and key
@@ -108,8 +121,18 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-384 \
   -out /etc/salt/pki/incus/client.crt \
   -nodes -days 3650 -subj "/CN=salt-cloud"
 
-# Trust the certificate on the Incus server
-incus config trust add-certificate /etc/salt/pki/incus/client.crt
+# Apply formula state that manages Incus trust list
+salt-call --local state.apply incus.trust pillar='{
+  "incus": {
+    "enable": true,
+    "api_client_trust": {
+      "enable": true,
+      "ensure": "present",
+      "name": "salt-cloud",
+      "cert_path": "/etc/salt/pki/incus/client.crt"
+    }
+  }
+}'
 ```
 
 ### TLS Verification Options

@@ -2,6 +2,7 @@
 include:
   - .install
   - .certificates
+  - .trust
   - .lxcfs
   - .settings
   - .images

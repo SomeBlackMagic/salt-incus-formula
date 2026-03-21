@@ -80,6 +80,34 @@ incus:
     # update_cmd: update-ca-certificates
 ```
 
+### API Client Trust Parameters (optional)
+
+```yaml
+incus:
+  api_client_trust:
+    enable: true
+    ensure: present            # present | absent
+    name: salt-cloud
+    cert_path: /etc/salt/pki/incus/client.crt
+
+    # Source priority (top to bottom):
+    # cert_sdb: sdb://vault/incus/client_cert
+    # cert_contents: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    #   -----END CERTIFICATE-----
+    # cert_source: salt://incus/files/client.crt
+    cert_sdb: null
+    cert_contents: null
+    cert_source: null
+```
+
+Notes:
+- `api_client_trust` works only when `incus.enable: true`.
+- `cert_sdb` has highest priority; if it is set but resolves to empty value, state fails.
+- `ensure: absent` with missing `cert_path` logs a warning and performs no changes.
+- If trust entry with the same `name` already exists but has different fingerprint, state fails.
+
 ## Generated Resources
 
 ### With Enabled Repository
@@ -167,6 +195,23 @@ incus:
     sdb: sdb://vault/incus/ca
 ```
 
+### Manage Incus API Client Trust
+
+```yaml
+incus:
+  enable: true
+  client_cert:
+    enable: true
+    cert_path: /etc/salt/pki/incus/client.crt
+    key_path: /etc/salt/pki/incus/client.key
+
+  api_client_trust:
+    enable: true
+    ensure: present
+    name: salt-cloud
+    cert_path: /etc/salt/pki/incus/client.crt
+```
+
 ## Dependencies
 
 ### Grains
@@ -185,7 +230,8 @@ incus:
 3. Create a repository sources file (if the repository is enabled)
 4. Update package index and install Incus
 5. Import/update trusted CA certificate (optional)
-6. Install additional dependencies
+6. Manage API client certificate trust list (optional)
+7. Install additional dependencies
 
 ## Features
 

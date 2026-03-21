@@ -53,6 +53,47 @@ incus:
       # - btrfs-progs     # For using Btrfs (optional)
       # - ovmf            # For UEFI virtual machines (optional)
 
+  # Optional: import remote CA certificate into system trust store
+  trust_store:
+    enable: false
+    # One of the options below:
+    # sdb: sdb://vault/incus/ca
+    # source: salt://incus/files/incus-remote-ca.crt
+    # contents: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    #   -----END CERTIFICATE-----
+    #
+    # Optional overrides:
+    # target: /usr/local/share/ca-certificates/incus-remote.crt
+    # update_cmd: update-ca-certificates
+
+  # HTTPS connection certificate storage for _modules/incus.py and _clouds/incus.py
+  connection:
+    type: unix
+    socket: /var/lib/incus/unix.socket
+    cert_storage:
+      type: local_files # local_files | sdb
+      # local_files example:
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+      verify: true
+      # sdb example:
+      # type: sdb
+      # cert: sdb://vault/incus/client_cert
+      # key: sdb://vault/incus/client_key
+      # verify: sdb://vault/incus/ca_cert
+
+  # Optional: generate client certificate/key pair if missing
+  client_cert:
+    enable: false
+    # If omitted, falls back to connection.cert_storage.cert/key for local_files
+    cert_path: /etc/salt/pki/incus/client.crt
+    key_path: /etc/salt/pki/incus/client.key
+    cn: salt-incus-client
+    days: 3650
+    curve: P-384
+
 # ============================================================================
 # Configuration examples
 # ============================================================================
@@ -81,6 +122,13 @@ incus:
 #       - qemu-kvm
 #       - lxcfs
 #       - zfsutils-linux
+
+# --- Example 2b: Install and trust remote Incus CA from SDB ---
+# incus:
+#   enable: true
+#   trust_store:
+#     enable: true
+#     sdb: sdb://vault/incus/ca
 
 # --- Example 3: Install edge version for testing ---
 # incus:

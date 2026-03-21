@@ -21,6 +21,11 @@ State `incus.install` manages the installation of the Incus package and its depe
    - Installing additional packages required for Incus operation
    - Configured via pillar `incus.pkg.deps`
 
+4. **System Trust Store Import** (optional):
+   - Imports a CA certificate into OS trusted certificates
+   - Certificate source can be `sdb://...`, inline `contents`, or `source`
+   - Runs trust-store refresh command after certificate updates
+
 ## File Structure
 
 ### states/incus/install.sls
@@ -56,6 +61,25 @@ incus:
       - lxcfs
 ```
 
+### Trust Store Parameters (optional)
+
+```yaml
+incus:
+  trust_store:
+    enable: true
+    # Choose one:
+    sdb: sdb://vault/incus/ca
+    # source: salt://incus/files/incus-remote-ca.crt
+    # contents: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    #   -----END CERTIFICATE-----
+    #
+    # Optional overrides:
+    # target: /usr/local/share/ca-certificates/incus-remote.crt
+    # update_cmd: update-ca-certificates
+```
+
 ## Generated Resources
 
 ### With Enabled Repository
@@ -79,6 +103,7 @@ Signed-By: /etc/apt/keyrings/zabbly.asc
 
 - `incus` - main package
 - Additional packages from `incus.pkg.deps` list
+- `ca-certificates` - installed when `incus.trust_store.enable: true`
 
 ## Usage Examples
 
@@ -132,6 +157,16 @@ incus:
       - lxcfs
 ```
 
+### Import CA Certificate from SDB
+
+```yaml
+incus:
+  enable: true
+  trust_store:
+    enable: true
+    sdb: sdb://vault/incus/ca
+```
+
 ## Dependencies
 
 ### Grains
@@ -149,7 +184,8 @@ incus:
 2. Download the GPG key (if the repository is enabled)
 3. Create a repository sources file (if the repository is enabled)
 4. Update package index and install Incus
-5. Install additional dependencies
+5. Import/update trusted CA certificate (optional)
+6. Install additional dependencies
 
 ## Features
 

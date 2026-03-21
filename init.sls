@@ -1,6 +1,7 @@
 # Main entry point for incus formula
 include:
   - .install
+  - .certificates
   - .lxcfs
   - .settings
   - .images

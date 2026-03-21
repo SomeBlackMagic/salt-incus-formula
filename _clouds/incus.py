@@ -20,9 +20,11 @@ and virtual machines) on a local or remote Incus server.
           connection:
             type: https
             url: https://incus.example.com:8443
-            cert: /path/to/client.crt
-            key: /path/to/client.key
-            verify: True  # or False or /path/to/ca.crt
+            cert_storage:
+              type: local_files  # or sdb
+              cert: /path/to/client.crt
+              key: /path/to/client.key
+              verify: True  # or False or /path/to/ca.crt
 
 :profile: Configure profiles in ``/etc/salt/cloud.profiles.d/incus.conf``:
 
@@ -50,9 +52,12 @@ and virtual machines) on a local or remote Incus server.
 :depends: requests
 """
 
+import copy
 import json
 import logging
+import os
 import socket
+import tempfile
 import time
 from urllib.parse import quote, urljoin
 
@@ -91,9 +96,12 @@ DEFAULT_CFG = {
         "type": "unix",               # "unix" | "https"
         "socket": INCUS_SOCKET_PATH,  # path to unix socket
         "url": None,                  # https URL, e.g. https://incus.example.com:8443
-        "cert": None,                 # client cert path
-        "key": None,                  # client key path
-        "verify": True,               # verify=True|False|/path/to/ca.crt
+        "cert_storage": {
+            "type": "local_files",    # "local_files" | "sdb"
+            "cert": None,             # local path or sdb:// URI (for type=sdb)
+            "key": None,              # local path or sdb:// URI (for type=sdb)
+            "verify": True,           # bool/path or sdb:// URI (for type=sdb)
+        },
     }
 }
 
@@ -112,6 +120,213 @@ def deep_merge(base, override):
         else:
             base[k] = v
     return base
+
+
+def _sdb_get(uri):
+    """
+    Resolve a value from SDB URI.
+    """
+    utils = globals().get("__utils__", {}) or {}
+
+    # Preferred path in loaded Salt context
+    for util_name in ("sdb.get", "sdb.sdb_get"):
+        getter = utils.get(util_name) if hasattr(utils, "get") else None
+        if callable(getter):
+            try:
+                return getter(uri)
+            except Exception as exc:
+                raise SaltCloudException(
+                    f"Failed to resolve SDB URI '{uri}': {exc}"
+                ) from exc
+
+    # Fallback for direct module execution/import tests
+    try:
+        import salt.utils.sdb as salt_sdb
+    except Exception as exc:
+        raise SaltCloudException(
+            f"Failed to import salt.utils.sdb for URI '{uri}': {exc}"
+        ) from exc
+
+    opts = globals().get("__opts__", {}) or {}
+    try:
+        return salt_sdb.sdb_get(uri, opts, utils)
+    except TypeError:
+        return salt_sdb.sdb_get(uri, opts)
+    except Exception as exc:
+        raise SaltCloudException(
+            f"Failed to resolve SDB URI '{uri}': {exc}"
+        ) from exc
+
+
+def _normalize_cert_storage(conn):
+    """
+    Normalize TLS settings to unified ``cert_storage`` structure.
+
+    Supports legacy flat keys for backward compatibility:
+      - cert/cert_sdb
+      - key/key_sdb
+      - verify/verify_sdb
+    """
+    def _legacy_storage():
+        return {
+            "type": "sdb"
+            if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
+            else "local_files",
+            "cert": conn.get("cert_sdb") or conn.get("cert"),
+            "key": conn.get("key_sdb") or conn.get("key"),
+            "verify": (
+                conn["verify_sdb"]
+                if conn.get("verify_sdb") is not None
+                else conn.get("verify", True)
+            ),
+        }
+
+    legacy_present = any(
+        conn.get(k) is not None
+        for k in ("cert", "cert_sdb", "key", "key_sdb", "verify", "verify_sdb")
+    )
+
+    cert_storage = conn.get("cert_storage")
+    if cert_storage is not None:
+        if not isinstance(cert_storage, dict):
+            raise ValueError("connection.cert_storage must be a mapping")
+        stype = cert_storage.get("type", "local_files")
+        if stype not in ("local_files", "sdb"):
+            raise ValueError(
+                "connection.cert_storage.type must be 'local_files' or 'sdb'"
+            )
+        normalized = {
+            "type": stype,
+            "cert": cert_storage.get("cert"),
+            "key": cert_storage.get("key"),
+            "verify": cert_storage.get("verify", True),
+        }
+        # If cert_storage is just defaulted and legacy keys are set, prefer legacy.
+        if (
+            legacy_present
+            and normalized["type"] == "local_files"
+            and normalized["cert"] is None
+            and normalized["key"] is None
+            and normalized["verify"] is True
+        ):
+            return _legacy_storage()
+        return normalized
+
+    # Backward-compatible fallback for old flat keys.
+    return {
+        "type": "sdb"
+        if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
+        else "local_files",
+        "cert": conn.get("cert_sdb") or conn.get("cert"),
+        "key": conn.get("key_sdb") or conn.get("key"),
+        "verify": (
+            conn["verify_sdb"]
+            if conn.get("verify_sdb") is not None
+            else conn.get("verify", True)
+        ),
+    }
+
+
+def _resolve_cert_storage_value(cert_storage, key, default=None):
+    """
+    Resolve TLS value from normalized ``cert_storage``.
+    Returns ``(value, from_sdb)``.
+    """
+    value = cert_storage.get(key, default)
+    stype = cert_storage.get("type", "local_files")
+
+    if value is None:
+        value = default
+
+    if stype == "sdb":
+        # verify may stay implicit True in sdb mode.
+        if key == "verify" and value is True:
+            return True, False
+        if value in (None, ""):
+            return value, False
+        if not isinstance(value, str) or not value.startswith("sdb://"):
+            raise ValueError(
+                f"connection.cert_storage.{key} must be an sdb:// URI for type=sdb"
+            )
+        resolved = _sdb_get(value)
+        if resolved in (None, ""):
+            raise ValueError(f"SDB URI returned empty value: {value}")
+        return resolved, True
+
+    if isinstance(value, str) and value.startswith("sdb://"):
+        resolved = _sdb_get(value)
+        if resolved in (None, ""):
+            raise ValueError(f"SDB URI returned empty value: {value}")
+        return resolved, True
+
+    return value, False
+
+
+def _resolve_connection_value(conn, key, default=None):
+    """
+    Compatibility helper used by tests and old call sites.
+    """
+    cert_storage = _normalize_cert_storage(conn)
+    return _resolve_cert_storage_value(cert_storage, key, default=default)
+
+
+def _write_temp_file(contents, suffix):
+    """
+    Write secret/certificate material to a temporary file.
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="incus-cloud-",
+        suffix=suffix,
+        delete=False,
+    ) as fp:
+        fp.write(contents)
+        path = fp.name
+
+    os.chmod(path, 0o600)
+    return path
+
+
+def _ensure_file_path(value, suffix, force_temp=False):
+    """
+    Ensure value is a filesystem path for requests, materializing content if needed.
+    Returns (path_or_value, is_temporary_file).
+    """
+    if value is None:
+        return None, False
+
+    if not isinstance(value, str):
+        value = str(value)
+
+    if not force_temp and os.path.exists(value):
+        return value, False
+
+    # PEM-like inline data or explicit SDB materialization
+    if force_temp or "\n" in value or "-----BEGIN " in value:
+        return _write_temp_file(value, suffix), True
+
+    return value, False
+
+
+def _coerce_verify_value(value):
+    """
+    Normalize verify setting to bool or path-like string.
+    """
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return True
+
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+
+    return value
 
 
 # ==============================================================
@@ -197,8 +412,29 @@ class UnixHTTPAdapter(HTTPAdapter):
 class IncusClient:
     def __init__(self, cfg):
         self.config = cfg
+        self._temp_files = []
         self.session = self._create_session()
         self.base_url = self._get_base_url()
+
+    def _track_temp_file(self, path):
+        if path:
+            self._temp_files.append(path)
+
+    def close(self):
+        if getattr(self, "session", None):
+            try:
+                self.session.close()
+            except Exception:
+                pass
+        for path in self._temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self._temp_files = []
+
+    def __del__(self):
+        self.close()
 
     def _create_session(self):
         session = requests.Session()
@@ -226,9 +462,37 @@ class IncusClient:
         # REMOTE HTTPS
         # ============================================
         elif ctype == "https":
-            if conn.get("cert") and conn.get("key"):
-                session.cert = (conn["cert"], conn["key"])
-            session.verify = conn.get("verify", True)
+            cert_storage = _normalize_cert_storage(conn)
+            cert_value, cert_from_sdb = _resolve_cert_storage_value(cert_storage, "cert")
+            key_value, key_from_sdb = _resolve_cert_storage_value(cert_storage, "key")
+
+            if bool(cert_value) != bool(key_value):
+                raise ValueError("HTTPS connection requires both cert and key")
+
+            if cert_value and key_value:
+                cert_path, cert_temp = _ensure_file_path(cert_value, ".crt", force_temp=cert_from_sdb)
+                key_path, key_temp = _ensure_file_path(key_value, ".key", force_temp=key_from_sdb)
+                if cert_temp:
+                    self._track_temp_file(cert_path)
+                if key_temp:
+                    self._track_temp_file(key_path)
+                session.cert = (cert_path, key_path)
+
+            verify_value, verify_from_sdb = _resolve_cert_storage_value(
+                cert_storage, "verify", True
+            )
+            verify_value = _coerce_verify_value(verify_value)
+            if isinstance(verify_value, str):
+                verify_path, verify_temp = _ensure_file_path(
+                    verify_value,
+                    ".crt",
+                    force_temp=verify_from_sdb,
+                )
+                if verify_temp:
+                    self._track_temp_file(verify_path)
+                session.verify = verify_path
+            else:
+                session.verify = verify_value
             return session
 
         raise ValueError(f"Unsupported connection type: {ctype}")
@@ -415,7 +679,7 @@ def _client():
         raise SaltCloudSystemExit("Incus cloud provider is not configured")
 
     conn_cfg = provider.get("connection", {})
-    cfg = deep_merge(DEFAULT_CFG.copy(), {"connection": conn_cfg})
+    cfg = deep_merge(copy.deepcopy(DEFAULT_CFG), {"connection": conn_cfg})
     return IncusClient(cfg)
 
 

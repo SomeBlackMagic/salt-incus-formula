@@ -93,6 +93,7 @@ incus_driver.__opts__ = {
     "query.selection": [],
 }
 incus_driver.__active_provider_name__ = "my-incus"
+incus_driver.__utils__ = {}
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,129 @@ class TestDeepMerge(unittest.TestCase):
         base = {"k": "old"}
         result = incus_driver.deep_merge(base, {"k": "new"})
         self.assertEqual(result["k"], "new")
+
+
+# ---------------------------------------------------------------------------
+# 2b. SDB-backed TLS values
+# ---------------------------------------------------------------------------
+
+class TestSdbConnectionResolution(unittest.TestCase):
+
+    def setUp(self):
+        self._orig_utils = getattr(incus_driver, "__utils__", {})
+        incus_driver.__utils__ = {}
+
+    def tearDown(self):
+        incus_driver.__utils__ = self._orig_utils
+
+    def test_resolve_connection_value_from_sdb_key(self):
+        getter = MagicMock(return_value="CERTDATA")
+        incus_driver.__utils__ = {"sdb.get": getter}
+
+        value, from_sdb = incus_driver._resolve_connection_value(
+            {
+                "cert_storage": {
+                    "type": "sdb",
+                    "cert": "sdb://vault/incus/cert",
+                }
+            },
+            "cert",
+        )
+
+        self.assertTrue(from_sdb)
+        self.assertEqual(value, "CERTDATA")
+        getter.assert_called_once_with("sdb://vault/incus/cert")
+
+    def test_resolve_connection_value_from_inline_sdb_uri(self):
+        getter = MagicMock(return_value="false")
+        incus_driver.__utils__ = {"sdb.get": getter}
+
+        value, from_sdb = incus_driver._resolve_connection_value(
+            {
+                "cert_storage": {
+                    "type": "local_files",
+                    "verify": "sdb://vault/incus/verify",
+                }
+            },
+            "verify",
+            True,
+        )
+
+        self.assertTrue(from_sdb)
+        self.assertEqual(value, "false")
+        getter.assert_called_once_with("sdb://vault/incus/verify")
+
+    def test_resolve_connection_value_from_legacy_flat_sdb_key(self):
+        getter = MagicMock(return_value="CERTDATA")
+        incus_driver.__utils__ = {"sdb.get": getter}
+
+        value, from_sdb = incus_driver._resolve_connection_value(
+            {"cert_sdb": "sdb://vault/incus/cert"},
+            "cert",
+        )
+
+        self.assertTrue(from_sdb)
+        self.assertEqual(value, "CERTDATA")
+        getter.assert_called_once_with("sdb://vault/incus/cert")
+
+    def test_https_session_materializes_sdb_certs_and_cleanup(self):
+        cert_pem = "-----BEGIN CERTIFICATE-----\nCERTDATA\n-----END CERTIFICATE-----\n"
+        key_pem = "-----BEGIN PRIVATE KEY-----\nKEYDATA\n-----END PRIVATE KEY-----\n"
+        ca_pem = "-----BEGIN CERTIFICATE-----\nCADATA\n-----END CERTIFICATE-----\n"
+
+        mapping = {
+            "sdb://vault/incus/cert": cert_pem,
+            "sdb://vault/incus/key": key_pem,
+            "sdb://vault/incus/ca": ca_pem,
+        }
+        incus_driver.__utils__ = {"sdb.get": MagicMock(side_effect=lambda uri: mapping[uri])}
+
+        client = incus_driver.IncusClient(
+            {
+                "connection": {
+                    "type": "https",
+                    "url": "https://incus.example.com:8443",
+                    "cert_storage": {
+                        "type": "sdb",
+                        "cert": "sdb://vault/incus/cert",
+                        "key": "sdb://vault/incus/key",
+                        "verify": "sdb://vault/incus/ca",
+                    },
+                }
+            }
+        )
+
+        cert_path, key_path = client.session.cert
+        verify_path = client.session.verify
+
+        self.assertTrue(os.path.exists(cert_path))
+        self.assertTrue(os.path.exists(key_path))
+        self.assertTrue(os.path.exists(verify_path))
+
+        client.close()
+
+        self.assertFalse(os.path.exists(cert_path))
+        self.assertFalse(os.path.exists(key_path))
+        self.assertFalse(os.path.exists(verify_path))
+
+    def test_verify_sdb_false_string_is_coerced_to_bool(self):
+        incus_driver.__utils__ = {"sdb.get": MagicMock(return_value="false")}
+
+        client = incus_driver.IncusClient(
+            {
+                "connection": {
+                    "type": "https",
+                    "url": "https://incus.example.com:8443",
+                    "cert_storage": {
+                        "type": "sdb",
+                        "verify": "sdb://vault/incus/verify",
+                    },
+                }
+            }
+        )
+
+        self.assertIs(client.session.verify, False)
+        client.close()
 
 
 # ---------------------------------------------------------------------------

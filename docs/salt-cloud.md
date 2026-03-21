@@ -92,9 +92,11 @@ my-incus-remote:
   connection:
     type: https
     url: https://incus.example.com:8443
-    cert: /etc/salt/pki/incus/client.crt
-    key: /etc/salt/pki/incus/client.key
-    verify: true                          # verify server certificate (recommended)
+    cert_storage:
+      type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+      verify: true                        # verify server certificate (recommended)
 ```
 
 Generate a client certificate accepted by Incus:
@@ -112,7 +114,7 @@ incus config trust add-certificate /etc/salt/pki/incus/client.crt
 
 ### TLS Verification Options
 
-The `verify` key accepts three forms:
+The `connection.cert_storage.verify` key accepts three forms:
 
 | Value             | Behaviour                                                         |
 |-------------------|-------------------------------------------------------------------|
@@ -127,10 +129,36 @@ my-incus-custom-ca:
   connection:
     type: https
     url: https://incus.internal:8443
-    cert: /etc/salt/pki/incus/client.crt
-    key: /etc/salt/pki/incus/client.key
-    verify: /etc/ssl/certs/my-internal-ca.crt
+    cert_storage:
+      type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+      verify: /etc/ssl/certs/my-internal-ca.crt
 ```
+
+### SDB-backed Certificate Sources
+
+You can store TLS material in Salt SDB and reference it from provider config.
+The driver resolves `sdb://...` URIs and, when needed, writes temporary files
+for `requests`.
+
+```yaml
+my-incus-remote-sdb:
+  driver: incus
+  connection:
+    type: https
+    url: https://incus.internal:8443
+    cert_storage:
+      type: sdb
+      cert: sdb://vault/incus/client_cert
+      key: sdb://vault/incus/client_key
+      verify: sdb://vault/incus/ca_cert
+```
+
+Notes:
+- Use `connection.cert_storage.type: sdb` to resolve all TLS values via SDB.
+- `connection.cert_storage.verify` may return `true`, `false`, CA file path, or CA certificate content.
+- Legacy flat keys (`cert_sdb`, `key_sdb`, `verify_sdb`) remain supported for compatibility.
 
 ### Multiple Providers
 
@@ -144,9 +172,11 @@ incus-prod:
   connection:
     type: https
     url: https://incus-prod.example.com:8443
-    cert: /etc/salt/pki/incus/client.crt
-    key: /etc/salt/pki/incus/client.key
-    verify: true
+    cert_storage:
+      type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+      verify: true
 
 incus-staging:
   driver: incus
@@ -559,9 +589,10 @@ need the IP immediately.
 | `connection.type`   | no       | `unix`                       | `unix` or `https`                                |
 | `connection.socket` | no       | `/var/lib/incus/unix.socket` | Path to Unix socket (type=unix)                  |
 | `connection.url`    | no       | —                            | HTTPS URL, e.g. `https://host:8443` (type=https) |
-| `connection.cert`   | no       | —                            | Path to client certificate (type=https)          |
-| `connection.key`    | no       | —                            | Path to client key (type=https)                  |
-| `connection.verify` | no       | `true`                       | TLS verification: `true`, `false`, or CA path    |
+| `connection.cert_storage.type` | no | `local_files`           | TLS storage mode: `local_files` or `sdb`         |
+| `connection.cert_storage.cert` | no | —                       | Cert path (`local_files`) or `sdb://...` URI     |
+| `connection.cert_storage.key` | no | —                        | Key path (`local_files`) or `sdb://...` URI      |
+| `connection.cert_storage.verify` | no | `true`                | TLS verify bool/path (`local_files`) or `sdb://...` |
 
 ### Profile Keys
 
@@ -669,14 +700,16 @@ Either provide the correct CA certificate:
 
 ```yaml
 connection:
-  verify: /path/to/your/ca.crt
+  cert_storage:
+    verify: /path/to/your/ca.crt
 ```
 
 Or temporarily disable verification for testing (**not for production**):
 
 ```yaml
 connection:
-  verify: false
+  cert_storage:
+    verify: false
 ```
 
 ### Instance Already Exists

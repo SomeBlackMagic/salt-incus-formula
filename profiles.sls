@@ -1,5 +1,5 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set profiles = incus.get("profiles", {}) %}
+{% set profiles = incus.get("profiles") | default({}, true) %}
 
 # ======================================================================
 # Profiles

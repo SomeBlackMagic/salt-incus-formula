@@ -2,4 +2,4 @@
 {% import_yaml tpldir ~ '/defaults.yaml' as default %}
 
 {# pillar: incus:... overrides defaults #}
-{% set incus = salt['pillar.get']('incus', default.default, merge=True) %}
+{% set incus = salt['pillar.get']('incus', default.default, merge=True) | default(default.default, true) %}

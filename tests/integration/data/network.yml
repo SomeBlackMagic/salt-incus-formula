@@ -428,3 +428,16 @@ cases:
         - "changes"
     cleanup:
       - incus network delete net-bridge-16
+
+  # ============================================================
+  # CASE 17: network_017 - Null networks is treated as empty
+  # ============================================================
+  - name: network_017
+    pillars:
+      incus:
+        networks: null
+    command: state.apply networks
+    expected:
+      salt_output_not_contains:
+        - "Jinja variable 'None' has no attribute 'items'"
+        - "Rendering SLS 'base:networks' failed"

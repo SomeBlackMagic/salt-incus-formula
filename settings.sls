@@ -1,6 +1,6 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set server_settings = incus.get("server_settings", {}) %}
-{% set server_settings_individual = incus.get("server_settings_individual", {}) %}
+{% set server_settings = incus.get("server_settings") | default({}, true) %}
+{% set server_settings_individual = incus.get("server_settings_individual") | default({}, true) %}
 
 # ======================================================================
 # Server Settings

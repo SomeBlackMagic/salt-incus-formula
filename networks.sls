@@ -1,9 +1,9 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set networks = incus.get("networks", {}) %}
-{% set network_acls = incus.get("network_acls", {}) %}
-{% set network_forwards = incus.get("network_forwards", {}) %}
-{% set network_peers = incus.get("network_peers", {}) %}
-{% set network_zones = incus.get("network_zones", {}) %}
+{% set networks = incus.get("networks") | default({}, true) %}
+{% set network_acls = incus.get("network_acls") | default({}, true) %}
+{% set network_forwards = incus.get("network_forwards") | default({}, true) %}
+{% set network_peers = incus.get("network_peers") | default({}, true) %}
+{% set network_zones = incus.get("network_zones") | default({}, true) %}
 
 # ======================================================================
 # Networks
@@ -109,8 +109,9 @@ incus-network-zone-{{ zone_name }}:
     {%- endif %}
 
 {# Network Zone Records #}
-{%- if zone.get("records") %}
-{%- for record_name, record in zone.get("records").items() %}
+{%- set zone_records = zone.get("records") | default({}, true) %}
+{%- if zone_records %}
+{%- for record_name, record in zone_records.items() %}
 incus-network-zone-{{ zone_name }}-record-{{ record_name }}:
   incus.network_zone_record_present:
     - zone: {{ zone_name | tojson }}

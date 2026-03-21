@@ -662,3 +662,16 @@ cases:
         - "changes"
     cleanup:
       - incus profile delete test-profile-22
+
+  # ============================================================
+  # CASE 23: profile_023 - Null profiles is treated as empty
+  # ============================================================
+  - name: profile_023
+    pillars:
+      incus:
+        profiles: null
+    command: state.apply profiles
+    expected:
+      salt_output_not_contains:
+        - "Jinja variable 'None' has no attribute 'items'"
+        - "Rendering SLS 'base:profiles' failed"

@@ -89,17 +89,18 @@ default:
     #     driver: zfs
     #     source: tank/incus
 
-  networks: []
+  networks: {}
     # Example structure (override in pillar):
-    # - name: incusbr0
+    # incusbr0:
+    #   network_type: bridge
     #   config:
     #     ipv4.address: 10.0.0.1/24
     #     ipv4.nat: "true"
     #     ipv6.address: none
 
-  profiles: []
+  profiles: {}
     # Example structure (override in pillar):
-    # - name: default
+    # default:
     #   config:
     #     limits.cpu: "2"
     #     limits.memory: 2GiB

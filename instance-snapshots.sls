@@ -1,5 +1,5 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set instance_snapshots = incus.get("instance_snapshots", {}) %}
+{% set instance_snapshots = incus.get("instance_snapshots") | default({}, true) %}
 
 # ======================================================================
 # Instance Snapshots
@@ -108,7 +108,7 @@ incus_instance_snapshots_managed_{{ safe_instance_name }}:
 # creating new ones.
 # ======================================================================
 
-{%- set rotation_policies = incus.get("snapshot_rotation", {}) %}
+{%- set rotation_policies = incus.get("snapshot_rotation") | default({}, true) %}
 {% for policy_id, policy in rotation_policies.items() %}
 {%- set policy_instance = policy.get("instance") %}
 {%- set policy_pattern = policy.get("pattern") %}

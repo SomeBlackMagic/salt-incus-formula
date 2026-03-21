@@ -291,14 +291,13 @@ incus:
 
 ```yaml
 incus:
-  network:
-    networks:
-      internal:
-        type: bridge
-        config:
-          ipv4.address: 10.0.100.1/24
-          ipv4.nat: "true"
-          ipv6.address: none
+  networks:
+    internal:
+      network_type: bridge
+      config:
+        ipv4.address: 10.0.100.1/24
+        ipv4.nat: "true"
+        ipv6.address: none
 ```
 
 ## Documentation
@@ -524,4 +523,3 @@ The GNU General Public License v3.0
 - [Incus Documentation](https://linuxcontainers.org/incus/docs/main/)
 - [Incus REST API](https://linuxcontainers.org/incus/docs/main/rest-api/)
 - [Salt States Documentation](https://docs.saltproject.io/en/latest/ref/states/all/)
- 

@@ -1,8 +1,8 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set storage_pools = incus.get("storage_pools", {}) %}
-{% set storage_volumes = incus.get("storage_volumes", {}) %}
-{% set volume_snapshots = incus.get("volume_snapshots", {}) %}
-{% set volume_attachments = incus.get("volume_attachments", {}) %}
+{% set storage_pools = incus.get("storage_pools") | default({}, true) %}
+{% set storage_volumes = incus.get("storage_volumes") | default({}, true) %}
+{% set volume_snapshots = incus.get("volume_snapshots") | default({}, true) %}
+{% set volume_attachments = incus.get("volume_attachments") | default({}, true) %}
 
 # ======================================================================
 # Storage Pools

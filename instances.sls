@@ -1,5 +1,5 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set instances = incus.get("instances", {}) %}
+{% set instances = incus.get("instances") | default({}, true) %}
 
 {% for inst_name, inst in instances.items() %}
 incus-instance-{{ inst_name }}:

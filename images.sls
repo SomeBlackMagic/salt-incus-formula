@@ -1,5 +1,5 @@
 {%- from tpldir ~ "/map.jinja" import incus with context %}
-{% set images = incus.get("images", {}) %}
+{% set images = incus.get("images") | default({}, true) %}
 
 {#
   Note: img_name becomes the PRIMARY alias for the image in Incus.

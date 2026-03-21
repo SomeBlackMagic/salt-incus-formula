@@ -75,14 +75,15 @@ incus:
         source: tank/incus
 
   networks:
-    - name: incusbr0
+    incusbr0:
+      network_type: bridge
       config:
         ipv4.address: 10.0.0.1/24
         ipv4.nat: "true"
         ipv6.address: none
 
   profiles:
-    - name: default
+    default:
       config:
         limits.cpu: "2"
         limits.memory: 2GiB

@@ -54,6 +54,10 @@ incus:
       update_description: ""  # Description update (optional)
 ```
 
+`profiles` must be a dictionary keyed by profile name (not a list).
+
+If `profiles` is set to `null`, the state treats it as an empty dictionary.
+
 ### Main Parameters
 
 - **ensure**: `present` (create/update) or `absent` (delete)

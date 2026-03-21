@@ -34,6 +34,10 @@ incus:
   network_zones: {}      # DNS zones and records
 ```
 
+`networks`, `network_acls`, `network_forwards`, `network_peers`, and `network_zones` must be dictionaries keyed by object name/ID (not lists).
+
+If any of these keys are set to `null`, the state treats them as empty dictionaries.
+
 ## Networks
 
 ### Network Types

@@ -1,23 +1,26 @@
 {% from tpldir ~ "/map.jinja" import incus with context %}
+{% set global_config = incus.get("global") | default({}, true) %}
+{% set lxcfs_config = global_config.get("lxcfs") | default({}, true) %}
+{% set lxcfs_modules = lxcfs_config.get("modules") | default({}, true) %}
 
 {% set flags = [] %}
 
-{% if incus.global.lxcfs.modules.get("loadavg", False) %}
+{% if lxcfs_modules.get("loadavg", False) %}
 {% do flags.append("--enable-loadavg") %}
 {% endif %}
-{% if incus.global.lxcfs.modules.get("cfs", False) %}
+{% if lxcfs_modules.get("cfs", False) %}
 {% do flags.append("--enable-cfs") %}
 {% endif %}
-{% if incus.global.lxcfs.modules.get("memory", False) %}
+{% if lxcfs_modules.get("memory", False) %}
 {% do flags.append("--enable-memory") %}
 {% endif %}
-{% if incus.global.lxcfs.modules.get("cpuset", False) %}
+{% if lxcfs_modules.get("cpuset", False) %}
 {% do flags.append("--enable-cpuset") %}
 {% endif %}
-{% if incus.global.lxcfs.modules.get("sysinfo", False) %}
+{% if lxcfs_modules.get("sysinfo", False) %}
 {% do flags.append("--enable-sysinfo") %}
 {% endif %}
-{% if incus.global.lxcfs.modules.get("pidfd", False) %}
+{% if lxcfs_modules.get("pidfd", False) %}
 {% do flags.append("--enable-pidfd") %}
 {% endif %}
 

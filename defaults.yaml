@@ -33,16 +33,22 @@ default:
 
   api_client:
     enabled: false
-    storage:
-      type: local_files
+    # Storage used by `incus.tls-generate` (local writable target).
+    generate_storage:
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    # Storage used by `incus.tls` trust import state.
+    import_storage:
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    # Storage used by salt-cloud / HTTPS API client connection.
+    # Will be used as fallback for `connection.cert_storage` when cert/key are not set there.
+    salt_cloud_storage:
       cert: /etc/salt/pki/incus/client.crt
       key: /etc/salt/pki/incus/client.key
     generate:
       cn: salt-cloud
       days: 3650
-    trust_import: false
-    trust_name: salt-cloud
-    trust_restricted: false
 
   global:
     lxcfs:

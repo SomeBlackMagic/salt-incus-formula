@@ -59,6 +59,7 @@ import os
 import socket
 import tempfile
 import time
+import ast
 from urllib.parse import quote, urljoin
 
 try:
@@ -122,145 +123,6 @@ def deep_merge(base, override):
     return base
 
 
-def _sdb_get(uri):
-    """
-    Resolve a value from SDB URI.
-    """
-    utils = globals().get("__utils__", {}) or {}
-
-    # Preferred path in loaded Salt context
-    for util_name in ("sdb.get", "sdb.sdb_get"):
-        getter = utils.get(util_name) if hasattr(utils, "get") else None
-        if callable(getter):
-            try:
-                return getter(uri)
-            except Exception as exc:
-                raise SaltCloudException(
-                    f"Failed to resolve SDB URI '{uri}': {exc}"
-                ) from exc
-
-    # Fallback for direct module execution/import tests
-    try:
-        import salt.utils.sdb as salt_sdb
-    except Exception as exc:
-        raise SaltCloudException(
-            f"Failed to import salt.utils.sdb for URI '{uri}': {exc}"
-        ) from exc
-
-    opts = globals().get("__opts__", {}) or {}
-    try:
-        return salt_sdb.sdb_get(uri, opts, utils)
-    except TypeError:
-        return salt_sdb.sdb_get(uri, opts)
-    except Exception as exc:
-        raise SaltCloudException(
-            f"Failed to resolve SDB URI '{uri}': {exc}"
-        ) from exc
-
-
-def _normalize_cert_storage(conn):
-    """
-    Normalize TLS settings to unified ``cert_storage`` structure.
-
-    Supports legacy flat keys for backward compatibility:
-      - cert/cert_sdb
-      - key/key_sdb
-      - verify/verify_sdb
-    """
-    def _legacy_storage():
-        return {
-            "type": "sdb"
-            if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
-            else "local_files",
-            "cert": conn.get("cert_sdb") or conn.get("cert"),
-            "key": conn.get("key_sdb") or conn.get("key"),
-            "verify": (
-                conn["verify_sdb"]
-                if conn.get("verify_sdb") is not None
-                else conn.get("verify", True)
-            ),
-        }
-
-    legacy_present = any(
-        conn.get(k) is not None
-        for k in ("cert", "cert_sdb", "key", "key_sdb", "verify", "verify_sdb")
-    )
-
-    cert_storage = conn.get("cert_storage")
-    if cert_storage is not None:
-        if not isinstance(cert_storage, dict):
-            raise ValueError("connection.cert_storage must be a mapping")
-        stype = cert_storage.get("type", "local_files")
-        if stype not in ("local_files", "sdb"):
-            raise ValueError(
-                "connection.cert_storage.type must be 'local_files' or 'sdb'"
-            )
-        normalized = {
-            "type": stype,
-            "cert": cert_storage.get("cert"),
-            "key": cert_storage.get("key"),
-            "verify": cert_storage.get("verify", True),
-        }
-        # If cert_storage is just defaulted and legacy keys are set, prefer legacy.
-        if (
-            legacy_present
-            and normalized["type"] == "local_files"
-            and normalized["cert"] is None
-            and normalized["key"] is None
-            and normalized["verify"] is True
-        ):
-            return _legacy_storage()
-        return normalized
-
-    # Backward-compatible fallback for old flat keys.
-    return {
-        "type": "sdb"
-        if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
-        else "local_files",
-        "cert": conn.get("cert_sdb") or conn.get("cert"),
-        "key": conn.get("key_sdb") or conn.get("key"),
-        "verify": (
-            conn["verify_sdb"]
-            if conn.get("verify_sdb") is not None
-            else conn.get("verify", True)
-        ),
-    }
-
-
-def _resolve_cert_storage_value(cert_storage, key, default=None):
-    """
-    Resolve TLS value from normalized ``cert_storage``.
-    Returns ``(value, from_sdb)``.
-    """
-    value = cert_storage.get(key, default)
-    stype = cert_storage.get("type", "local_files")
-
-    if value is None:
-        value = default
-
-    if stype == "sdb":
-        # verify may stay implicit True in sdb mode.
-        if key == "verify" and value is True:
-            return True, False
-        if value in (None, ""):
-            return value, False
-        if not isinstance(value, str) or not value.startswith("sdb://"):
-            raise ValueError(
-                f"connection.cert_storage.{key} must be an sdb:// URI for type=sdb"
-            )
-        resolved = _sdb_get(value)
-        if resolved in (None, ""):
-            raise ValueError(f"SDB URI returned empty value: {value}")
-        return resolved, True
-
-    if isinstance(value, str) and value.startswith("sdb://"):
-        resolved = _sdb_get(value)
-        if resolved in (None, ""):
-            raise ValueError(f"SDB URI returned empty value: {value}")
-        return resolved, True
-
-    return value, False
-
 
 def _resolve_connection_value(conn, key, default=None):
     """
@@ -268,6 +130,88 @@ def _resolve_connection_value(conn, key, default=None):
     """
     cert_storage = _normalize_cert_storage(conn)
     return _resolve_cert_storage_value(cert_storage, key, default=default)
+
+
+def _filter_event_safe(tag, data, defaults):
+    """
+    Wrapper around salt.utils.cloud.filter_event that tolerates runtimes
+    where salt.utils.cloud.__opts__ is not initialized.
+    """
+    try:
+        return salt.utils.cloud.filter_event(tag, data, defaults)
+    except Exception as exc:
+        log.debug("Fallback event filtering for tag '%s': %s", tag, exc)
+        if not isinstance(data, dict):
+            return {}
+        return {key: data.get(key) for key in (defaults or []) if key in data}
+
+
+def _normalize_cert_storage(conn):
+    """
+    Normalize TLS storage configuration for HTTPS connection.
+
+    Supports the nested structure:
+      connection:
+        cert_storage:
+          cert: /path/client.crt
+          key: /path/client.key
+          verify: true|false|/path/ca.crt
+
+    and legacy flat keys under ``connection``:
+      cert, key, verify
+    """
+    if not isinstance(conn, dict):
+        conn = {}
+
+    defaults = DEFAULT_CFG.get("connection", {}).get("cert_storage", {})
+    normalized = copy.deepcopy(defaults) if isinstance(defaults, dict) else {
+        "type": "local_files",
+        "cert": None,
+        "key": None,
+        "verify": True,
+    }
+
+    nested = conn.get("cert_storage", {})
+    if isinstance(nested, dict):
+        normalized.update(nested)
+
+    # Backward-compatible flat keys.
+    if normalized.get("cert") in (None, "") and conn.get("cert") not in (None, ""):
+        normalized["cert"] = conn.get("cert")
+    if normalized.get("key") in (None, "") and conn.get("key") not in (None, ""):
+        normalized["key"] = conn.get("key")
+    if conn.get("verify") is not None and (
+        "verify" not in (nested if isinstance(nested, dict) else {})
+    ):
+        normalized["verify"] = conn.get("verify")
+
+    return normalized
+
+
+def _resolve_cert_storage_value(cert_storage, key, default=None):
+    """
+    Resolve a single TLS storage value.
+
+    This project flow uses local files only. ``sdb://`` URIs are rejected with
+    a clear error to avoid silent misconfiguration.
+    """
+    if default is None:
+        default = True if key == "verify" else None
+
+    if not isinstance(cert_storage, dict):
+        return default, False
+
+    value = cert_storage.get(key, default)
+    if value in (None, ""):
+        return default, False
+
+    if isinstance(value, str) and value.startswith("sdb://"):
+        raise SaltCloudException(
+            "sdb:// values are not supported in this project setup for "
+            "incus cloud driver. Use local file paths in connection.cert_storage."
+        )
+
+    return value, False
 
 
 def _write_temp_file(contents, suffix):
@@ -535,36 +479,32 @@ class IncusClient:
             return response.json()
 
         except requests.exceptions.RequestException as e:
-
-            # Enhanced error logging for 5xx errors
             if hasattr(e, "response") and e.response is not None:
                 status_code = e.response.status_code
+                api_error = None
+                try:
+                    error_body = e.response.json()
+                    if isinstance(error_body, dict):
+                        api_error = error_body.get("error")
+                        metadata = error_body.get("metadata")
+                        if not api_error and isinstance(metadata, dict):
+                            api_error = metadata.get("err")
+                except Exception:
+                    api_error = None
 
-                if 500 <= status_code < 600:
-                    log.error("=" * 60)
-                    log.error("Incus API Server Error (HTTP %d)", status_code)
-                    log.error("=" * 60)
-                    log.error("Request URL: %s %s", method, url)
-                    log.error("Request params: %s", params)
-                    log.error("Request data (JSON): %s", json.dumps(data, indent=2) if data else "None")
+                if not api_error:
+                    text = (e.response.text or "").strip()
+                    api_error = text if text else str(e)
 
-                    try:
-                        error_body = e.response.json()
-                        log.error("Response body: %s", json.dumps(error_body, indent=2))
-
-                        if isinstance(error_body, dict):
-                            if "error" in error_body:
-                                log.error("Incus error message: %s", error_body["error"])
-                            if "metadata" in error_body and isinstance(error_body["metadata"], dict):
-                                if "err" in error_body["metadata"]:
-                                    log.error("Incus metadata error: %s", error_body["metadata"]["err"])
-                    except Exception:
-                        log.error("Response body (raw): %s", e.response.text)
-
-                    log.error("=" * 60)
-
+                log.error(
+                    "Incus API request failed: %s %s -> HTTP %s: %s",
+                    method,
+                    url,
+                    status_code,
+                    api_error,
+                )
             return {
-                "error": str(e),
+                "error": api_error if "api_error" in locals() and api_error else str(e),
                 "error_code": getattr(getattr(e, "response", None), "status_code", None),
             }
 
@@ -898,13 +838,26 @@ def list_images(call=None):
         name = alias.get("name", "")
         if not name:
             continue
-        target = alias.get("target", {}) or {}
+        target = alias.get("target")
+        if isinstance(target, dict):
+            target_type = target.get("type", "")
+            target_arch = target.get("architecture", "")
+            target_fp = target.get("fingerprint", "")
+        elif isinstance(target, str):
+            # Incus API commonly returns alias.target as fingerprint string.
+            target_type = ""
+            target_arch = ""
+            target_fp = target
+        else:
+            target_type = ""
+            target_arch = ""
+            target_fp = ""
         images[name] = {
             "name": name,
             "description": alias.get("description", ""),
-            "type": target.get("type", ""),
-            "architecture": target.get("architecture", ""),
-            "fingerprint": target.get("fingerprint", ""),
+            "type": target_type,
+            "architecture": target_arch,
+            "fingerprint": target_fp,
         }
 
     return images
@@ -1062,7 +1015,7 @@ def create(vm_):
         "event",
         "starting create",
         f"salt/cloud/{name}/creating",
-        args=salt.utils.cloud.filter_event(
+        args=_filter_event_safe(
             "creating", vm_, ["name", "profile", "provider", "driver"]
         ),
         sock_dir=__opts__["sock_dir"],
@@ -1103,7 +1056,7 @@ def create(vm_):
         "event",
         "requesting instance",
         f"salt/cloud/{name}/requesting",
-        args=salt.utils.cloud.filter_event(
+        args=_filter_event_safe(
             "requesting", vm_, ["name", "profile", "provider", "driver"]
         ),
         sock_dir=__opts__["sock_dir"],
@@ -1113,8 +1066,8 @@ def create(vm_):
     # Create the instance (async operation)
     result = client._sync_request("POST", "/instances", data=data)
 
-    if result.get("error_code") not in (None, 0):
-        error_msg = result.get("error", "Unknown error")
+    if result.get("success") is False or result.get("error_code") not in (None, 0):
+        error_msg = result.get("error") or result.get("comment") or "Unknown error"
         raise SaltCloudException(
             f"Failed to create Incus instance '{name}': {error_msg}"
         )
@@ -1128,8 +1081,8 @@ def create(vm_):
         data={"action": "start", "force": False},
     )
 
-    if start_result.get("error_code") not in (None, 0):
-        error_msg = start_result.get("error", "Unknown error")
+    if start_result.get("success") is False or start_result.get("error_code") not in (None, 0):
+        error_msg = start_result.get("error") or start_result.get("comment") or "Unknown error"
         raise SaltCloudException(
             f"Failed to start Incus instance '{name}': {error_msg}"
         )
@@ -1160,7 +1113,7 @@ def create(vm_):
         "event",
         "created instance",
         f"salt/cloud/{name}/created",
-        args=salt.utils.cloud.filter_event(
+        args=_filter_event_safe(
             "created", vm_, ["name", "profile", "provider", "driver"]
         ),
         sock_dir=__opts__["sock_dir"],

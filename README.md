@@ -356,7 +356,7 @@ Detailed documentation for each component is located in the `docs/` directory:
   - Performance tuning
 
 - **[tls-api-client.md](docs/tls-api-client.md)** - API client TLS / PKI workflow
-  - Manual keypair generation via `salt-call`
+  - Local keypair generation state: `incus.tls-generate`
   - Trust import into Incus
   - local_files and SDB storage examples
   - Idempotency and `test=True` behavior

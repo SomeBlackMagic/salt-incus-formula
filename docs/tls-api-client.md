@@ -6,7 +6,7 @@ This document explains how to use the formula PKI flow for Incus API client auth
 
 The PKI flow has 3 phases:
 
-1. Generate a client certificate/key pair via `salt-call`.
+1. Generate a client certificate/key pair via local state `incus.tls-generate`.
 2. Import the certificate into the local Incus trust store (optional, controlled by pillar).
 3. Reuse the same certificate/key in `incus.connection` for HTTPS API calls (including salt-cloud use cases).
 
@@ -23,19 +23,21 @@ The feature is configured under `incus:api_client`:
 incus:
   api_client:
     enabled: true
-    storage:
+    generate_storage:
       type: local_files   # local_files | sdb
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    import_storage:
+      cert: salt://incus/pki/client.crt
+      key: salt://incus/pki/client.key
+    salt_cloud_storage:
       cert: /etc/salt/pki/incus/client.crt
       key: /etc/salt/pki/incus/client.key
     generate:
       cn: salt-cloud
       days: 3650
-    trust_import: true
-    trust_name: salt-cloud
-    trust_restricted: false
+    restricted: false
 ```
-
-Canonical import flag: `incus:api_client:trust_import`.
 
 ## Salt-Cloud Example Files
 
@@ -56,16 +58,20 @@ incus:
 
   api_client:
     enabled: true
-    storage:
+    generate_storage:
       type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    import_storage:
+      cert: salt://incus/pki/client.crt
+      key: salt://incus/pki/client.key
+    salt_cloud_storage:
       cert: /etc/salt/pki/incus/client.crt
       key: /etc/salt/pki/incus/client.key
     generate:
       cn: salt-cloud
       days: 3650
-    trust_import: true
-    trust_name: salt-cloud
-    trust_restricted: false
+    restricted: false
 
   connection:
     type: https
@@ -77,13 +83,13 @@ incus:
       verify: true
 ```
 
-### 2. Generate keypair manually (required pre-step)
+### 2. Generate keypair locally (required pre-step)
 
 Run on the target minion:
 
 ```bash
 salt-call --local saltutil.sync_all
-salt-call --local incus_pki.generate_keypair
+salt-call --local state.apply incus.tls-generate
 ```
 
 Optional rotation:
@@ -113,7 +119,7 @@ salt-call --local incus_pki.trust_present_check
 
 ## Scenario 2: SDB Storage
 
-Use SDB URIs for both `api_client.storage` and HTTPS `connection.cert_storage`.
+Use SDB URIs for selected phases (for example trust import and salt-cloud connection).
 Full example file: `pillars.example/tls-sdb.sls`.
 
 ### 1. Configure SDB backend (example)
@@ -140,16 +146,20 @@ incus:
 
   api_client:
     enabled: true
-    storage:
-      type: sdb
+    generate_storage:
+      type: local_files
+      cert: /etc/salt/pki/incus/client.crt
+      key: /etc/salt/pki/incus/client.key
+    import_storage:
+      cert: sdb://vault/incus/client_cert
+      key: sdb://vault/incus/client_key
+    salt_cloud_storage:
       cert: sdb://vault/incus/client_cert
       key: sdb://vault/incus/client_key
     generate:
       cn: salt-cloud
       days: 3650
-    trust_import: true
-    trust_name: salt-cloud
-    trust_restricted: false
+    restricted: false
 
   connection:
     type: https
@@ -165,7 +175,7 @@ incus:
 
 ```bash
 salt-call --local saltutil.sync_all
-salt-call --local incus_pki.generate_keypair
+salt-call --local state.apply incus.tls-generate
 salt-call --local incus_pki.cert_get
 salt-call --local incus_pki.key_get
 ```
@@ -200,6 +210,7 @@ salt-cloud -p ubuntu-container-sdb test-sdb-01
 Dry-run examples:
 
 ```bash
+salt-call --local state.apply incus.tls-generate test=True
 salt-call --local state.apply incus.tls test=True
 salt-call --local state.apply incus test=True
 ```
@@ -228,25 +239,23 @@ salt-call --local incus.trust_remove <fingerprint>
 
 Cause:
 
-- `trust_import: true`, but generation step was skipped.
+- Generation step was skipped.
 - Wrong `storage.cert` / `storage.key` path or SDB URI.
 
 Fix:
 
-1. Run `salt-call --local incus_pki.generate_keypair`.
+1. Run `salt-call --local state.apply incus.tls-generate`.
 2. Check `incus_pki.cert_get` and `incus_pki.key_get`.
 
 ### Trust state does not run
 
 Cause:
 
-- `incus.enable` is `false`.
 - `incus.api_client.enabled` is `false`.
-- `incus.api_client.trust_import` is `false`.
 
 Fix:
 
-- Enable the required flags and apply `incus` or `incus.tls` again.
+- Enable `incus.api_client.enabled` and apply `incus.tls` again.
 
 ### SDB read/write failures
 

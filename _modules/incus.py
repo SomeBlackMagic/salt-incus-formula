@@ -12,7 +12,7 @@ This module provides functions to interact with Incus API for managing:
 Supports both local (Unix socket) and remote (HTTPS) connections.
 
 :configuration: Can be configured via pillar or minion config:
-    
+
     incus:
       connection:
         type: unix  # or https
@@ -35,6 +35,7 @@ import os
 import socket
 import tempfile
 import time
+import ast
 from urllib.parse import quote, urljoin
 
 try:
@@ -92,194 +93,6 @@ def deep_merge(base, override):
         else:
             base[k] = v
     return base
-
-
-def _sdb_get(uri):
-    """
-    Resolve a value from SDB URI.
-    """
-    utils = globals().get("__utils__", {}) or {}
-
-    for util_name in ("sdb.get", "sdb.sdb_get"):
-        getter = utils.get(util_name) if hasattr(utils, "get") else None
-        if callable(getter):
-            return getter(uri)
-
-    try:
-        import salt.utils.sdb as salt_sdb
-    except Exception as exc:
-        raise ValueError(f"Failed to import salt.utils.sdb for URI '{uri}': {exc}") from exc
-
-    opts = globals().get("__opts__", {}) or {}
-    try:
-        return salt_sdb.sdb_get(uri, opts, utils)
-    except TypeError:
-        return salt_sdb.sdb_get(uri, opts)
-    except Exception as exc:
-        raise ValueError(f"Failed to resolve SDB URI '{uri}': {exc}") from exc
-
-
-def _normalize_cert_storage(conn):
-    """
-    Normalize TLS settings to unified ``cert_storage`` structure.
-
-    Supports legacy flat keys for backward compatibility:
-      - cert/cert_sdb
-      - key/key_sdb
-      - verify/verify_sdb
-    """
-    def _legacy_storage():
-        return {
-            "type": "sdb"
-            if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
-            else "local_files",
-            "cert": conn.get("cert_sdb") or conn.get("cert"),
-            "key": conn.get("key_sdb") or conn.get("key"),
-            "verify": (
-                conn["verify_sdb"]
-                if conn.get("verify_sdb") is not None
-                else conn.get("verify", True)
-            ),
-        }
-
-    legacy_present = any(
-        conn.get(k) is not None
-        for k in ("cert", "cert_sdb", "key", "key_sdb", "verify", "verify_sdb")
-    )
-
-    cert_storage = conn.get("cert_storage")
-    if cert_storage is not None:
-        if not isinstance(cert_storage, dict):
-            raise ValueError("connection.cert_storage must be a mapping")
-        stype = cert_storage.get("type", "local_files")
-        if stype not in ("local_files", "sdb"):
-            raise ValueError(
-                "connection.cert_storage.type must be 'local_files' or 'sdb'"
-            )
-        normalized = {
-            "type": stype,
-            "cert": cert_storage.get("cert"),
-            "key": cert_storage.get("key"),
-            "verify": cert_storage.get("verify", True),
-        }
-        # If cert_storage is just defaulted and legacy keys are set, prefer legacy.
-        if (
-            legacy_present
-            and normalized["type"] == "local_files"
-            and normalized["cert"] is None
-            and normalized["key"] is None
-            and normalized["verify"] is True
-        ):
-            return _legacy_storage()
-        return normalized
-
-    # Backward-compatible fallback for old flat keys.
-    return {
-        "type": "sdb"
-        if any(conn.get(k) for k in ("cert_sdb", "key_sdb", "verify_sdb"))
-        else "local_files",
-        "cert": conn.get("cert_sdb") or conn.get("cert"),
-        "key": conn.get("key_sdb") or conn.get("key"),
-        "verify": (
-            conn["verify_sdb"]
-            if conn.get("verify_sdb") is not None
-            else conn.get("verify", True)
-        ),
-    }
-
-
-def _resolve_cert_storage_value(cert_storage, key, default=None):
-    """
-    Resolve TLS value from normalized ``cert_storage``.
-    Returns ``(value, from_sdb)``.
-    """
-    value = cert_storage.get(key, default)
-    stype = cert_storage.get("type", "local_files")
-
-    if value is None:
-        value = default
-
-    if stype == "sdb":
-        # verify may stay implicit True in sdb mode.
-        if key == "verify" and value is True:
-            return True, False
-        if value in (None, ""):
-            return value, False
-        if not isinstance(value, str) or not value.startswith("sdb://"):
-            raise ValueError(
-                f"connection.cert_storage.{key} must be an sdb:// URI for type=sdb"
-            )
-        resolved = _sdb_get(value)
-        if resolved in (None, ""):
-            raise ValueError(f"SDB URI returned empty value: {value}")
-        return resolved, True
-
-    if isinstance(value, str) and value.startswith("sdb://"):
-        resolved = _sdb_get(value)
-        if resolved in (None, ""):
-            raise ValueError(f"SDB URI returned empty value: {value}")
-        return resolved, True
-
-    return value, False
-
-
-def _write_temp_file(contents, suffix):
-    """
-    Write secret/certificate material to a temporary file.
-    """
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix="incus-module-",
-        suffix=suffix,
-        delete=False,
-    ) as fp:
-        fp.write(contents)
-        path = fp.name
-
-    os.chmod(path, 0o600)
-    return path
-
-
-def _ensure_file_path(value, suffix, force_temp=False):
-    """
-    Ensure value is a filesystem path for requests, materializing content if needed.
-    Returns (path_or_value, is_temporary_file).
-    """
-    if value is None:
-        return None, False
-
-    if not isinstance(value, str):
-        value = str(value)
-
-    if not force_temp and os.path.exists(value):
-        return value, False
-
-    if force_temp or "\n" in value or "-----BEGIN " in value:
-        return _write_temp_file(value, suffix), True
-
-    return value, False
-
-
-def _coerce_verify_value(value):
-    """
-    Normalize verify setting to bool or path-like string.
-    """
-    if isinstance(value, bool):
-        return value
-
-    if value is None:
-        return True
-
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered == "true":
-            return True
-        if lowered == "false":
-            return False
-
-    return value
-
 
 # ==============================================================
 # UNIX SOCKET BACKEND
@@ -390,7 +203,22 @@ class IncusClient:
 
     def _load_config(self):
         pillar_cfg = __salt__.get("config.get", lambda *_: {})("incus", {})
-        return deep_merge(copy.deepcopy(DEFAULT_CFG), pillar_cfg)
+        merged_cfg = deep_merge(copy.deepcopy(DEFAULT_CFG), pillar_cfg)
+
+        # Optional convenience fallback:
+        # api_client.salt_cloud_storage -> connection.cert_storage (cert/key only).
+        api_client_cfg = merged_cfg.get("api_client", {})
+        conn_cfg = merged_cfg.get("connection", {})
+        if isinstance(api_client_cfg, dict) and isinstance(conn_cfg, dict):
+            cloud_storage = api_client_cfg.get("salt_cloud_storage", {})
+            cert_storage = conn_cfg.get("cert_storage", {})
+            if isinstance(cloud_storage, dict) and isinstance(cert_storage, dict):
+                if not cert_storage.get("cert") and cloud_storage.get("cert"):
+                    cert_storage["cert"] = cloud_storage.get("cert")
+                if not cert_storage.get("key") and cloud_storage.get("key"):
+                    cert_storage["key"] = cloud_storage.get("key")
+
+        return merged_cfg
 
     def _create_session(self):
         session = requests.Session()
@@ -3981,100 +3809,6 @@ def image_secret_create(fingerprint):
     return {'success': True, 'secret': metadata}
 
 
-# ========== Trust Management Functions ==========
-
-def trust_list(recursion=1):
-    """
-    List trusted client certificates.
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' incus.trust_list
-    """
-    client = _client()
-    result = client._request('GET', '/certificates', params={'recursion': recursion})
-
-    if result.get('error_code') != 0:
-        return {'success': False, 'error': result.get('error', 'Failed to list trusted certificates')}
-
-    return {'success': True, 'certificates': result.get('metadata', [])}
-
-
-def trust_get(fingerprint):
-    """
-    Get trusted certificate details by fingerprint.
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' incus.trust_get <fingerprint>
-    """
-    if not fingerprint:
-        return {'success': False, 'error': 'fingerprint is required'}
-
-    client = _client()
-    result = client._request('GET', f'/certificates/{quote(fingerprint)}')
-
-    if result.get('error_code') != 0:
-        return {'success': False, 'error': result.get('error', 'Failed to get trusted certificate')}
-
-    return {'success': True, 'certificate': result.get('metadata', {})}
-
-
-def trust_add(cert_pem, name=None, restricted=False):
-    """
-    Add a client certificate to the Incus trust store.
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' incus.trust_add cert_pem="$(cat /path/client.crt)" name=salt-cloud restricted=False
-    """
-    if not cert_pem:
-        return {'success': False, 'error': 'cert_pem is required'}
-
-    data = {
-        'type': 'client',
-        'certificate': cert_pem,
-        'name': name or 'salt-cloud',
-        'restricted': bool(restricted),
-    }
-
-    client = _client()
-    result = client._sync_request('POST', '/certificates', data=data)
-
-    if result.get('error_code') != 0:
-        return {'success': False, 'error': result.get('error', 'Failed to add trusted certificate')}
-
-    return {'success': True, 'message': 'Certificate added to trust store'}
-
-
-def trust_remove(fingerprint):
-    """
-    Remove a trusted certificate by fingerprint.
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' incus.trust_remove <fingerprint>
-    """
-    if not fingerprint:
-        return {'success': False, 'error': 'fingerprint is required'}
-
-    client = _client()
-    result = client._sync_request('DELETE', f'/certificates/{quote(fingerprint)}')
-
-    if result.get('error_code') != 0:
-        return {'success': False, 'error': result.get('error', 'Failed to remove trusted certificate')}
-
-    return {'success': True, 'message': f'Certificate {fingerprint} removed from trust store'}
-
-
 # ========== Settings Management Functions ==========
 
 def settings_get():
@@ -4532,3 +4266,96 @@ def instance_wait_cloudinit(name, timeout=600, interval=5):
         'status': 'timeout',
         'error': f'Timeout waiting for cloud-init to complete after {elapsed:.1f}s'
     }
+
+# ========== Trust Management Functions ==========
+
+def trust_list(recursion=1):
+    """
+    List trusted client certificates.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.trust_list
+    """
+    client = _client()
+    result = client._request('GET', '/certificates', params={'recursion': recursion})
+
+    if result.get('error_code') != 0:
+        return {'success': False, 'error': result.get('error', 'Failed to list trusted certificates')}
+
+    return {'success': True, 'certificates': result.get('metadata', [])}
+
+
+def trust_get(fingerprint):
+    """
+    Get trusted certificate details by fingerprint.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.trust_get <fingerprint>
+    """
+    if not fingerprint:
+        return {'success': False, 'error': 'fingerprint is required'}
+
+    client = _client()
+    result = client._request('GET', f'/certificates/{quote(fingerprint)}')
+
+    if result.get('error_code') != 0:
+        return {'success': False, 'error': result.get('error', 'Failed to get trusted certificate')}
+
+    return {'success': True, 'certificate': result.get('metadata', {})}
+
+
+def trust_add(cert_pem, name=None, restricted=False):
+    """
+    Add a client certificate to the Incus trust store.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.trust_add cert_pem="$(cat /path/client.crt)" name=salt-cloud restricted=False
+    """
+    if not cert_pem:
+        return {'success': False, 'error': 'cert_pem is required'}
+
+    data = {
+        'type': 'client',
+        'certificate': cert_pem,
+        'name': name or 'salt-cloud',
+        'restricted': bool(restricted),
+    }
+
+    client = _client()
+    result = client._sync_request('POST', '/certificates', data=data)
+
+    if result.get('error_code') != 0:
+        return {'success': False, 'error': result.get('error', 'Failed to add trusted certificate')}
+
+    return {'success': True, 'message': 'Certificate added to trust store'}
+
+
+def trust_remove(fingerprint):
+    """
+    Remove a trusted certificate by fingerprint.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' incus.trust_remove <fingerprint>
+    """
+    if not fingerprint:
+        return {'success': False, 'error': 'fingerprint is required'}
+
+    client = _client()
+    result = client._sync_request('DELETE', f'/certificates/{quote(fingerprint)}')
+
+    if result.get('error_code') != 0:
+        return {'success': False, 'error': result.get('error', 'Failed to remove trusted certificate')}
+
+    return {'success': True, 'message': f'Certificate {fingerprint} removed from trust store'}

@@ -4,11 +4,11 @@ Salt execution module for managing Incus API client certificates.
 This module provides:
 - keypair generation (EC P-384 self-signed certificate)
 - storage helpers for local filesystem and Salt SDB
-- trust store synchronization helpers built on top of incus.trust_* functions
 """
 
 import datetime
 import hashlib
+import json
 import logging
 import os
 
@@ -19,7 +19,7 @@ try:
     from cryptography.x509.oid import NameOID
 
     HAS_CRYPTOGRAPHY = True
-except Exception:
+except ImportError:
     HAS_CRYPTOGRAPHY = False
 
 
@@ -28,7 +28,6 @@ log = logging.getLogger(__name__)
 __virtualname__ = "incus_pki"
 
 DEFAULT_STORAGE = {
-    "type": "local_files",
     "cert": "/etc/salt/pki/incus/client.crt",
     "key": "/etc/salt/pki/incus/client.key",
 }
@@ -51,27 +50,28 @@ def _api_client_cfg():
 
 def _normalize_storage(storage=None):
     if storage is None:
-        storage = _api_client_cfg().get("storage", {}) or {}
+        api_client_cfg = _api_client_cfg()
+        storage = (
+            api_client_cfg.get("generate_storage")
+            or api_client_cfg.get("import_storage")
+            or {}
+        )
+    elif isinstance(storage, str):
+        # Salt may pass inline JSON mapping as string from Jinja/YAML rendering.
+        try:
+            storage = json.loads(storage)
+        except ValueError as exc:
+            raise ValueError(f"storage must be a mapping, got string: {exc}") from exc
     if not isinstance(storage, dict):
         raise ValueError("storage must be a mapping")
 
     normalized = dict(DEFAULT_STORAGE)
     normalized.update(storage)
 
-    stype = normalized.get("type", "local_files")
-    if stype not in ("local_files", "sdb"):
-        raise ValueError("storage.type must be 'local_files' or 'sdb'")
-
-    cert = normalized.get("cert")
-    key = normalized.get("key")
-    if not cert or not key:
+    if not normalized.get("cert") or not normalized.get("key"):
         raise ValueError("storage.cert and storage.key are required")
 
-    return {
-        "type": stype,
-        "cert": cert,
-        "key": key,
-    }
+    return {"cert": normalized["cert"], "key": normalized["key"]}
 
 
 def _normalize_generate(cn=None, days=None):
@@ -93,92 +93,46 @@ def _normalize_generate(cn=None, days=None):
     return cert_cn, cert_days
 
 
-def _sdb_get(uri):
-    utils = globals().get("__utils__", {}) or {}
-
-    for util_name in ("sdb.get", "sdb.sdb_get"):
-        getter = utils.get(util_name) if hasattr(utils, "get") else None
-        if callable(getter):
-            return getter(uri)
-
-    try:
-        import salt.utils.sdb as salt_sdb
-    except Exception as exc:
-        raise ValueError(f"Failed to import salt.utils.sdb for URI '{uri}': {exc}") from exc
-
-    opts = globals().get("__opts__", {}) or {}
-    try:
-        return salt_sdb.sdb_get(uri, opts, utils)
-    except TypeError:
-        return salt_sdb.sdb_get(uri, opts)
-    except Exception as exc:
-        raise ValueError(f"Failed to resolve SDB URI '{uri}': {exc}") from exc
-
-
-def _sdb_set(uri, value):
-    utils = globals().get("__utils__", {}) or {}
-
-    for util_name in ("sdb.set", "sdb.sdb_set"):
-        setter = utils.get(util_name) if hasattr(utils, "get") else None
-        if callable(setter):
-            result = setter(uri, value)
-            if result is False:
-                raise ValueError(f"Failed to write SDB URI '{uri}'")
-            return result
-
-    try:
-        import salt.utils.sdb as salt_sdb
-    except Exception as exc:
-        raise ValueError(f"Failed to import salt.utils.sdb for URI '{uri}': {exc}") from exc
-
-    opts = globals().get("__opts__", {}) or {}
-    try:
-        result = salt_sdb.sdb_set(uri, value, opts, utils)
-    except TypeError:
-        result = salt_sdb.sdb_set(uri, value, opts)
-    except Exception as exc:
-        raise ValueError(f"Failed to write SDB URI '{uri}': {exc}") from exc
-
-    if result is False:
-        raise ValueError(f"Failed to write SDB URI '{uri}'")
-    return result
-
-
 def _storage_read(storage, key):
-    stype = storage.get("type", "local_files")
     target = storage.get(key)
-
-    if stype == "local_files":
-        if not target or not os.path.exists(target):
-            return None
-        with open(target, "r", encoding="utf-8") as fp:
-            return fp.read()
-
-    if not isinstance(target, str) or not target.startswith("sdb://"):
-        raise ValueError(f"storage.{key} must be an sdb:// URI for type=sdb")
-    value = _sdb_get(target)
-    if value in (None, ""):
+    if not target:
         return None
-    return str(value)
+    if target.startswith("sdb://"):
+        try:
+            value = __salt__["sdb.get"](target, strict=True)
+        except TypeError:
+            # Backward compatibility with older Salt versions.
+            value = __salt__["sdb.get"](target)
+        except Exception as exc:
+            raise ValueError(f"Failed to read SDB URI '{target}': {exc}") from exc
+
+        if value == target:
+            raise ValueError(
+                f"SDB URI '{target}' was not resolved. Check that the SDB profile is configured on this minion."
+            )
+        return value if value not in (None, "") else None
+    if target.startswith("salt://"):
+        return __salt__["cp.get_file_str"](target) or None
+    if not os.path.exists(target):
+        return None
+    with open(target, "r", encoding="utf-8") as fp:
+        return fp.read()
 
 
 def _storage_write(storage, key, value, mode):
-    stype = storage.get("type", "local_files")
     target = storage.get(key)
-
-    if stype == "local_files":
-        directory = os.path.dirname(target)
-        if directory:
-            os.makedirs(directory, mode=0o700, exist_ok=True)
-            os.chmod(directory, 0o700)
-        with open(target, "w", encoding="utf-8") as fp:
-            fp.write(value)
-        os.chmod(target, mode)
+    if target.startswith("sdb://"):
+        __salt__["sdb.set"](target, value)
         return
-
-    if not isinstance(target, str) or not target.startswith("sdb://"):
-        raise ValueError(f"storage.{key} must be an sdb:// URI for type=sdb")
-    _sdb_set(target, value)
+    if target.startswith("salt://"):
+        raise ValueError(f"salt:// is read-only, cannot write to {target}")
+    directory = os.path.dirname(target)
+    if directory:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+    with open(target, "w", encoding="utf-8") as fp:
+        fp.write(value)
+    os.chmod(target, mode)
 
 
 def _storage_write_pair(storage, cert_pem, key_pem):
@@ -219,21 +173,26 @@ def _fingerprint_from_cert(cert_pem):
     return hashlib.sha256(cert_der).hexdigest()
 
 
-def _normalize_fingerprint(value):
-    if value is None:
-        return ""
-    return str(value).replace(":", "").strip().lower()
+def _validate_cert_pem(cert_pem, source):
+    if not isinstance(cert_pem, str):
+        raise ValueError(f"Certificate from {source} must be a text PEM string")
+    if "-----BEGIN CERTIFICATE-----" not in cert_pem:
+        raise ValueError(f"Certificate from {source} is not a PEM certificate")
+    try:
+        x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Invalid certificate PEM in {source}: {exc}") from exc
 
 
-def _find_trust_entry(certificates, fingerprint):
-    normalized = _normalize_fingerprint(fingerprint)
-    for item in certificates or []:
-        if not isinstance(item, dict):
-            continue
-        current = _normalize_fingerprint(item.get("fingerprint"))
-        if current == normalized:
-            return item
-    return None
+def _validate_private_key_pem(key_pem, source):
+    if not isinstance(key_pem, str):
+        raise ValueError(f"Private key from {source} must be a text PEM string")
+    if "-----BEGIN " not in key_pem or "PRIVATE KEY-----" not in key_pem:
+        raise ValueError(f"Private key from {source} is not a PEM private key")
+    try:
+        serialization.load_pem_private_key(key_pem.encode("utf-8"), password=None)
+    except Exception as exc:
+        raise ValueError(f"Invalid private key PEM in {source}: {exc}") from exc
 
 
 def cert_get(storage=None):
@@ -247,9 +206,10 @@ def cert_get(storage=None):
             return {
                 "success": False,
                 "changed": False,
-                "comment": "Certificate not found in storage",
+                "comment": f"Certificate not found in storage: {normalized_storage.get('cert')}",
                 "error": "certificate_not_found",
             }
+        _validate_cert_pem(cert_pem, normalized_storage.get("cert"))
         return {
             "success": True,
             "changed": False,
@@ -277,9 +237,10 @@ def key_get(storage=None):
             return {
                 "success": False,
                 "changed": False,
-                "comment": "Private key not found in storage",
+                "comment": f"Private key not found in storage: {normalized_storage.get('key')}",
                 "error": "key_not_found",
             }
+        _validate_private_key_pem(key_pem, normalized_storage.get("key"))
         return {
             "success": True,
             "changed": False,
@@ -361,203 +322,5 @@ def generate_keypair(cn=None, days=None, storage=None, force=False):
             "success": False,
             "changed": False,
             "comment": f"Failed to generate TLS keypair: {exc}",
-            "error": str(exc),
-        }
-
-
-def trust_present_check(cert_pem=None, storage=None):
-    """
-    Check whether certificate fingerprint is present in Incus trust store.
-
-    Returns:
-        True  - certificate present
-        False - certificate missing
-        None  - Incus trust API error
-    """
-    try:
-        cert_value = cert_pem
-        if cert_value is None:
-            cert_result = cert_get(storage=storage)
-            if not cert_result.get("success"):
-                return False
-            cert_value = cert_result.get("cert")
-
-        fingerprint = _fingerprint_from_cert(cert_value)
-        trust_result = __salt__["incus.trust_list"]()
-        if not trust_result.get("success"):
-            return None
-
-        certificates = trust_result.get("certificates", [])
-        return _find_trust_entry(certificates, fingerprint) is not None
-    except Exception as exc:
-        log.error("Failed to check trust presence: %s", exc)
-        return None
-
-
-def trust_add_from_storage(name=None, storage=None, restricted=False):
-    """
-    Ensure certificate from storage exists in Incus trust store.
-
-    If fingerprint exists but trust name/restricted flags drift, certificate is
-    recreated (remove + add).
-    """
-    try:
-        cert_result = cert_get(storage=storage)
-        if not cert_result.get("success"):
-            return cert_result
-        cert_pem = cert_result.get("cert")
-
-        fp_result = cert_fingerprint(cert_pem=cert_pem)
-        if not fp_result.get("success"):
-            return fp_result
-        fingerprint = fp_result.get("fingerprint")
-
-        trust_result = __salt__["incus.trust_list"]()
-        if not trust_result.get("success"):
-            error = trust_result.get("error", "Failed to list trust store")
-            return {
-                "success": False,
-                "changed": False,
-                "comment": f"Failed to list trust store: {error}",
-                "error": error,
-            }
-
-        certificates = trust_result.get("certificates", [])
-        existing_entry = _find_trust_entry(certificates, fingerprint)
-        desired_name = name if name is not None else _api_client_cfg().get("trust_name", "salt-cloud")
-        desired_restricted = bool(restricted)
-
-        if existing_entry:
-            current_name = existing_entry.get("name")
-            current_restricted = bool(existing_entry.get("restricted", False))
-
-            if current_name != desired_name or current_restricted != desired_restricted:
-                remove_result = __salt__["incus.trust_remove"](fingerprint)
-                if not remove_result.get("success"):
-                    error = remove_result.get("error", "Failed to remove trust entry")
-                    return {
-                        "success": False,
-                        "changed": False,
-                        "comment": f"Failed to recreate trust entry (remove step): {error}",
-                        "error": error,
-                        "fingerprint": fingerprint,
-                    }
-
-                add_result = __salt__["incus.trust_add"](cert_pem, desired_name, desired_restricted)
-                if not add_result.get("success"):
-                    error = add_result.get("error", "Failed to add trust entry")
-                    return {
-                        "success": False,
-                        "changed": False,
-                        "comment": f"Failed to recreate trust entry (add step): {error}",
-                        "error": error,
-                        "fingerprint": fingerprint,
-                    }
-
-                log.info("Recreated trust entry for fingerprint %s", fingerprint)
-                return {
-                    "success": True,
-                    "changed": True,
-                    "comment": "Trust entry recreated to match desired name/restricted",
-                    "fingerprint": fingerprint,
-                    "action": "recreated",
-                }
-
-            return {
-                "success": True,
-                "changed": False,
-                "comment": "Certificate already present in trust store",
-                "fingerprint": fingerprint,
-                "action": "present",
-            }
-
-        add_result = __salt__["incus.trust_add"](cert_pem, desired_name, desired_restricted)
-        if not add_result.get("success"):
-            error = add_result.get("error", "Failed to add trust entry")
-            return {
-                "success": False,
-                "changed": False,
-                "comment": f"Failed to add trust entry: {error}",
-                "error": error,
-                "fingerprint": fingerprint,
-            }
-
-        log.info("Added trust entry for fingerprint %s", fingerprint)
-        return {
-            "success": True,
-            "changed": True,
-            "comment": "Certificate added to trust store",
-            "fingerprint": fingerprint,
-            "action": "added",
-        }
-    except Exception as exc:
-        log.error("Failed to ensure trust presence: %s", exc)
-        return {
-            "success": False,
-            "changed": False,
-            "comment": f"Failed to ensure trust presence: {exc}",
-            "error": str(exc),
-        }
-
-
-def trust_remove_from_storage(storage=None):
-    """
-    Remove certificate from Incus trust store by fingerprint derived from storage.
-    """
-    try:
-        cert_result = cert_get(storage=storage)
-        if not cert_result.get("success"):
-            return cert_result
-        cert_pem = cert_result.get("cert")
-
-        fp_result = cert_fingerprint(cert_pem=cert_pem)
-        if not fp_result.get("success"):
-            return fp_result
-        fingerprint = fp_result.get("fingerprint")
-
-        trust_result = __salt__["incus.trust_list"]()
-        if not trust_result.get("success"):
-            error = trust_result.get("error", "Failed to list trust store")
-            return {
-                "success": False,
-                "changed": False,
-                "comment": f"Failed to list trust store: {error}",
-                "error": error,
-            }
-
-        certificates = trust_result.get("certificates", [])
-        existing_entry = _find_trust_entry(certificates, fingerprint)
-        if not existing_entry:
-            return {
-                "success": True,
-                "changed": False,
-                "comment": "Certificate is already absent from trust store",
-                "fingerprint": fingerprint,
-            }
-
-        remove_result = __salt__["incus.trust_remove"](fingerprint)
-        if not remove_result.get("success"):
-            error = remove_result.get("error", "Failed to remove trust entry")
-            return {
-                "success": False,
-                "changed": False,
-                "comment": f"Failed to remove trust entry: {error}",
-                "error": error,
-                "fingerprint": fingerprint,
-            }
-
-        log.info("Removed trust entry for fingerprint %s", fingerprint)
-        return {
-            "success": True,
-            "changed": True,
-            "comment": "Certificate removed from trust store",
-            "fingerprint": fingerprint,
-        }
-    except Exception as exc:
-        log.error("Failed to remove certificate from trust store: %s", exc)
-        return {
-            "success": False,
-            "changed": False,
-            "comment": f"Failed to remove certificate from trust store: {exc}",
             "error": str(exc),
         }

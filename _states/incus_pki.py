@@ -10,9 +10,9 @@ __virtualname__ = "incus_pki"
 
 
 def __virtual__():
-    if "incus_pki.generate_keypair" in __salt__:
-        return __virtualname__
-    return (False, "incus_pki execution module is not available")
+    if "incus_pki.cert_get" not in __salt__:
+        return False, "incus_pki execution module is unavailable; ensure modules are synced and python-cryptography is installed"
+    return __virtualname__
 
 
 def _normalize_fingerprint(value):

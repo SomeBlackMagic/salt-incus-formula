@@ -24,6 +24,7 @@ default:
     name: incus
     # Extra OS-level dependencies, if any. Override in pillar.
     deps:
+      - python3-cryptography
       - qemu-kvm
       - lxcfs
 

@@ -1,0 +1,9 @@
+name: someblackmagic/incus-formula
+os: Debian, Ubuntu, Raspbian, RedHat, Fedora, CentOS
+os_family: Debian, RedHat
+version: 0.7.0
+release: 1
+minimum_version: 3006
+summary: Incus formula
+description: Salt formula for installing and managing Incus container/VM hypervisor
+top_level_dir: incus

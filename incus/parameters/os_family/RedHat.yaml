@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+# vim: ft=yaml
+#
+# Set values specific to:
+#   salt['config.get']('os_family') == RedHat.
+---
+values:
+  pkg:
+    deps:
+      - python3-cryptography
+      - qemu-kvm
+...

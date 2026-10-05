@@ -1,0 +1,12 @@
+.github
+.idea
+.kitchen
+bin
+docs
+test
+.gitignore
+.pre-commit-config.yaml
+.rstcheck.cfg
+.rubocop.yml
+.salt-lint
+.yamllint

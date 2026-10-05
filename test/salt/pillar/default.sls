@@ -4,8 +4,15 @@
 incus:
   enable: true
 
+  repo:
+    enable: true
+    channel: stable
+
   pkg:
     name: incus
+    deps:
+      - python3-cryptography
+      - lxcfs
 
   service:
     name: incus

@@ -1,45 +1,12 @@
 # -*- coding: utf-8 -*-
 # vim: ft=yaml
-#
-# Expected merged mapdata for Debian 13 (amd64)
-# Merge order: defaults.yaml + osarch/amd64.yaml + os_family/Debian.yaml + pillar
 ---
 values:
-  enable: true
-  arch: amd64
-
-  repo:
-    enable: false
-    debian:
-      name: 'deb [arch=amd64] https://pkgs.zabbly.com/incus/stable bookworm main'
-      human_name: 'Zabbly Incus repository'
-      uri: 'https://pkgs.zabbly.com/incus/stable'
-      dist: 'bookworm'
-      comps:
-        - main
-      architecture: amd64
-      channel: stable
-      key_url: 'https://pkgs.zabbly.com/key.asc'
-    redhat:
-      name: 'incus-stable'
-      baseurl: 'https://pkgs.zabbly.com/incus/stable/rpm/$releasever/$basearch'
-      gpgkey: 'https://pkgs.zabbly.com/key.asc'
-      enabled: 1
-      gpgcheck: 1
-
-  pkg:
-    name: incus
-    deps:
-      - python3-cryptography
-      - qemu-kvm
-      - lxcfs
-
-  connection:
-    type: 'unix'
-    socket: /var/lib/incus/unix.socket
-
   api_client:
     enabled: false
+    generate:
+      cn: salt-cloud
+      days: 3650
     generate_storage:
       cert: /etc/salt/pki/incus/client.crt
       key: /etc/salt/pki/incus/client.key
@@ -49,49 +16,71 @@ values:
     salt_cloud_storage:
       cert: /etc/salt/pki/incus/client.crt
       key: /etc/salt/pki/incus/client.key
-    generate:
-      cn: salt-cloud
-      days: 3650
-
+  arch: amd64
+  cluster: {}
+  connection:
+    socket: /var/lib/incus/unix.socket
+    type: unix
+  enable: true
   global:
     lxcfs:
       enable: false
       modules:
-        loadavg: true
         cfs: true
-        memory: true
         cpuset: true
-        sysinfo: true
+        loadavg: true
+        memory: true
         pidfd: true
-
-  service:
-    name: incus
-    enable: true
-
+        sysinfo: true
   images: {}
-  instances: {}
   instance_snapshots: {}
-  storage_pools: {}
-  storage_volumes: {}
-  volume_snapshots: {}
-  volume_attachments: {}
-  networks: {}
+  instances: {}
+  map_jinja:
+    sources:
+    - Y:G@osarch
+    - Y:G@os_family
+    - Y:G@os
+    - Y:G@osfinger
+    - C@incus:lookup
+    - C@incus
+    - Y:G@id
   network_acls: {}
   network_forwards: {}
   network_peers: {}
   network_zones: {}
+  networks: {}
+  pkg:
+    deps:
+    - python3-cryptography
+    - lxcfs
+    name: incus
   profiles: {}
+  repo:
+    channel: stable
+    debian:
+      architecture: amd64
+      channel: stable
+      comps:
+      - main
+      dist: bookworm
+      human_name: Zabbly Incus repository
+      key_url: https://pkgs.zabbly.com/key.asc
+      name: deb [arch=amd64] https://pkgs.zabbly.com/incus/stable bookworm main
+      uri: https://pkgs.zabbly.com/incus/stable
+    enable: true
+    redhat:
+      baseurl: https://pkgs.zabbly.com/incus/stable/rpm/$releasever/$basearch
+      enabled: 1
+      gpgcheck: 1
+      gpgkey: https://pkgs.zabbly.com/key.asc
+      name: incus-stable
   server_settings: {}
   server_settings_individual: {}
+  service:
+    enable: true
+    name: incus
   snapshot_rotation: {}
-  cluster: {}
-
-  map_jinja:
-    sources:
-      - "Y:G@osarch"
-      - "Y:G@os_family"
-      - "Y:G@os"
-      - "Y:G@osfinger"
-      - "C@incus:lookup"
-      - "C@incus"
-      - "Y:G@id"
+  storage_pools: {}
+  storage_volumes: {}
+  volume_attachments: {}
+  volume_snapshots: {}

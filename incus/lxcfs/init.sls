@@ -41,7 +41,7 @@ incus-lxcfs-override-dir:
     - name: /etc/systemd/system/incus-lxcfs.service.d
     - user: root
     - group: root
-    - mode: 0755
+    - mode: "0755"
 
 # ------------------------------------------------------------------------------
 # override.conf
@@ -51,7 +51,7 @@ incus-lxcfs-override-file:
     - name: /etc/systemd/system/incus-lxcfs.service.d/override.conf
     - user: root
     - group: root
-    - mode: 0644
+    - mode: "0644"
     - contents: |
         [Service]
         ExecStart=

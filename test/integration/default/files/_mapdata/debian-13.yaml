@@ -37,13 +37,13 @@ values:
   instances: {}
   map_jinja:
     sources:
-    - Y:G@osarch
-    - Y:G@os_family
-    - Y:G@os
-    - Y:G@osfinger
-    - C@incus:lookup
-    - C@incus
-    - Y:G@id
+      - Y:G@osarch
+      - Y:G@os_family
+      - Y:G@os
+      - Y:G@osfinger
+      - C@incus:lookup
+      - C@incus
+      - Y:G@id
   network_acls: {}
   network_forwards: {}
   network_peers: {}
@@ -51,8 +51,8 @@ values:
   networks: {}
   pkg:
     deps:
-    - python3-cryptography
-    - lxcfs
+      - python3-cryptography
+      - lxcfs
     name: incus
   profiles: {}
   repo:
@@ -61,7 +61,7 @@ values:
       architecture: amd64
       channel: stable
       comps:
-      - main
+        - main
       dist: bookworm
       human_name: Zabbly Incus repository
       key_url: https://pkgs.zabbly.com/key.asc

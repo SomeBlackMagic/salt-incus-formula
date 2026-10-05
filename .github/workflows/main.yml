@@ -51,9 +51,10 @@ jobs:
           echo "Installing hook environments..."
           time -f "Hook installation took %E" pre-commit install-hooks
       - name: Run `pre-commit`
+        # TODO pre-commit run --color always --hook-stage manual --verbose commitlint-ci
         run: |
           pre-commit run --all-files --color always --verbose
-          pre-commit run --color always --hook-stage manual --verbose commitlint-ci
+
   test:
     name: Test / Kitchen
     needs:

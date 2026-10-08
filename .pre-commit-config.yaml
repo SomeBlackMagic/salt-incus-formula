@@ -110,6 +110,13 @@ repos:
       - id: check-github-workflows
         name: Check GitHub workflows with check-jsonschema
         args: [--verbose]
+  - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
+    rev: 694e2c0dfb4253d51f3c6c54b8f9fec0a16764dc  # v1.7.11.24
+    hooks:
+      - id: actionlint
+        name: Check GitHub Actions semantics with actionlint
+        additional_dependencies:
+          - shellcheck-py==0.11.0.1
   - repo: https://github.com/standard/standard
     rev: v17.1.2
     hooks:

@@ -7,3 +7,8 @@ minimum_version: 3006
 summary: Incus formula
 description: Salt formula for installing and managing Incus container/VM hypervisor
 top_level_dir: incus
+
+dependencies:
+  - name: someblackmagic/incus-ext
+    version: "^1.0.0"
+    url: "https://someblackmagic.github.io/salt-incus-ext/repo/"

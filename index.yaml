@@ -1,7 +1,19 @@
 apiVersion: v1
-generated: 2026-10-08 18:51:26.873730
+generated: 2026-10-08 19:00:55.129541
 packages:
   someblackmagic/incus-formula:
+  - version: 1.0.0-rc1
+    url: https://github.com/SomeBlackMagic/salt-incus-formula/releases/download/someblackmagic/incus-formula-1.0.0-rc1/someblackmagic--incus-formula-1.0.0-rc1.tgz
+    digest: sha256:65d7452ac9e50b6f80e9076ecd7176364f064a0f41b712130315580afd3b4374
+    created: 2026-10-08 19:00:55.129430
+    keywords: []
+    maintainers: []
+    sources: []
+    dependencies:
+    - name: someblackmagic/incus-ext
+      version: ^1.0.0
+      url: https://someblackmagic.github.io/salt-incus-ext/repo/
+    type: formula
   - version: 0.7.0
     url: https://github.com/SomeBlackMagic/salt-incus-formula/releases/download/someblackmagic/incus-formula-0.7.0/someblackmagic--incus-formula-0.7.0.tgz
     digest: sha256:0864ab4eb028dcf8f53f5a29c279afecab89929df8d11c506b169a3782ee7a14

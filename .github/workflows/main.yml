@@ -175,7 +175,7 @@ jobs:
             echo "::WARNING file=FORMULA::Tag version '$tag_version' does not match FORMULA version '$formula_version'"
           fi
       
-          echo "version=$formula_version" >> "$GITHUB_OUTPUT"
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
 
       - name: Publish via salt-bundle
         # yamllint disable-line rule:line-length

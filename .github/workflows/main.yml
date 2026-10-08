@@ -159,6 +159,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify release version
+        id: version
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          tag_version="${TAG_VERSION#v}"
+          formula_version="$(sed -n -E 's/^version:[[:space:]]*//p' FORMULA)"
+      
+          if [[ -z "$formula_version" ]]; then
+            echo "::WARNING file=FORMULA::Version is missing"
+          fi
+      
+          if [[ "$tag_version" != "$formula_version" ]]; then
+            echo "::WARNING file=FORMULA::Tag version '$tag_version' does not match FORMULA version '$formula_version'"
+          fi
+      
+          echo "version=$formula_version" >> "$GITHUB_OUTPUT"
 
       - name: Publish via salt-bundle
         # yamllint disable-line rule:line-length
